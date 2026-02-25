@@ -1,0 +1,64 @@
+# Configurações do Projeto Captura ENA
+project:
+  name: "Captura ENA"
+  version: "1.0.0"
+  description: "Sistema de captura e processamento de dados ENA do ONS"
+
+# Configurações de diretórios
+paths:
+  raw_data: "Data/Dados Brutos"
+  processed_data: "Data/Dados Processados"
+  outputs: "Data/Outputs"
+  logs: "logs"
+  reports: "charts"
+
+# Configurações de dados
+data:
+  ena_pdp_folder: "arquivos_ENA_PDP_ONS"
+  pmo_filename: "PMO_mensal.xlsx"
+  ena_diario_filename: "ENA_DIARIO_SUBSISTEMA_{year}.csv"
+  
+# Configurações de URLs
+urls:
+  ena_diario_base: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/ena_subsistema_di/ENA_DIARIO_SUBSISTEMA_{}.csv"
+
+# Configurações de processamento
+processing:
+  sheet_6_index: 5  # Aba 6 (SUDESTE)
+  sheet_7_index: 6  # Aba 7 (SUL, NORDESTE, NORTE)
+  
+  # Linhas para extração de dados (formato novo)
+  sheet_6_ena_mwm_new: 180
+  sheet_6_ena_mlt_new: 181
+  
+  # Linhas para extração de dados (formato antigo)
+  sheet_6_ena_mwm_old: 177
+  sheet_6_ena_mlt_old: 178
+  
+  # Linhas para sheet 7
+  sheet_7_data_row: 4
+  sheet_7_sul_ena_mwm: 61
+  sheet_7_sul_ena_mlt: 62
+  sheet_7_nordeste_ena_mwm: 94
+  sheet_7_nordeste_ena_mlt: 95
+  sheet_7_norte_ena_mwm: 130
+  sheet_7_norte_ena_mlt: 131
+
+# Configurações de visualização
+visualization:
+  figure_size: [12, 8]
+  colors:
+    line_color: "blue"
+    last_line_color: "red"
+    pmo_color: "green"
+  y_limits: [0.1, 1.2]
+  # Configuração do filtro de período para visualizações
+  filter:
+    months_back: 1  # Número de meses para trás (ajustável)
+
+# Configurações de logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "captura_ena.log"
+

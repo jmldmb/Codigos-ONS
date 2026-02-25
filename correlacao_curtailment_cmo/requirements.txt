@@ -1,0 +1,14 @@
+# Requisitos para análise de correlação Curtailment vs CMO
+
+# Dependências principais
+pandas>=1.5.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Para processamento de dados
+openpyxl>=3.0.0  # Para leitura de arquivos Excel
+pathlib>=1.0.0   # Para manipulação de caminhos (built-in no Python 3.4+)
+
+# Logging e utilidades
+python-dateutil>=2.8.0

@@ -1,0 +1,38 @@
+# Configuração para Análise de Carga Energética - ONS
+
+# Diretórios
+directories:
+  raw_data: "Data/raw_data"
+  output_charts: "output/charts"
+
+# URLs e fontes de dados
+data_sources:
+  base_url: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/carga_energia_di/CARGA_ENERGIA_{}.csv"
+
+# Configurações dos gráficos
+charts:
+  # Configurações para gráfico de comparação horária
+  hourly_comparison:
+    enabled: true
+    # As datas serão determinadas automaticamente: último dia disponível vs mesmo dia ano anterior
+    period1: "auto"  # Será substituído pelo último dia disponível
+    period2: "auto"  # Será substituído pelo mesmo dia do ano anterior
+    # Se as datas acima não estiverem disponíveis, o sistema usará as últimas 2 datas disponíveis
+  
+  # Configurações para gráfico de crescimento YoY
+  yoy_growth:
+    enabled: true
+    year1: 2025  # Primeiro ano para comparação (ano atual)
+    year2: 2024  # Segundo ano para comparação (ano anterior)
+    moving_average_window: 14  # Janela para média móvel (dias)
+
+# Configurações de processamento
+processing:
+  remove_zeros: true  # Remove valores zero dos dados
+  min_data_points: 100  # Mínimo de pontos de dados para gerar gráfico
+
+# Configurações de saída
+output:
+  dpi: 300  # Resolução dos gráficos
+  format: "png"  # Formato dos arquivos de saída
+  include_timestamp: false  # Não incluir timestamp no nome dos arquivos (sobrescreve arquivos antigos) 

@@ -1,0 +1,203 @@
+{
+  "project_name": "Codigos ONS",
+  "description": "Sistema de análises do setor elétrico brasileiro - Estrutura de dados",
+  "version": "1.0.0",
+  "data_directories": {
+    "Captura ENA": {
+      "description": "Dados de Energia Natural Afluente",
+      "subdirs": {
+        "Data": {
+          "file_types": ["*.xls", "*.xlsx", "*.csv"],
+          "required": true
+        },
+        "charts": {
+          "file_types": ["*.png"],
+          "required": false
+        },
+        "logs": {
+          "file_types": ["*.log"],
+          "required": false
+        }
+      }
+    },
+    "Carga": {
+      "description": "Análises de carga do sistema",
+      "subdirs": {
+        "Data": {
+          "file_types": ["*.csv", "*.parquet"],
+          "required": true
+        },
+        "output": {
+          "file_types": ["*.png"],
+          "required": false
+        },
+        "logs": {
+          "file_types": ["*.log"],
+          "required": false
+        }
+      }
+    },
+    "carga_liquida": {
+      "description": "Análises de carga líquida",
+      "subdirs": {
+        "Data/raw": {
+          "file_types": ["*.parquet", "*.xlsx"],
+          "required": true
+        },
+        "Data/processed": {
+          "file_types": ["*.xlsx"],
+          "required": false
+        },
+        "Output": {
+          "file_types": ["*.png", "*.csv", "*.txt"],
+          "required": false
+        }
+      }
+    },
+    "correlacao_curtailment_cmo": {
+      "description": "Correlação entre curtailment e CMO",
+      "subdirs": {
+        "data": {
+          "file_types": ["*.csv", "*.parquet"],
+          "required": true
+        },
+        "output": {
+          "file_types": ["*.png", "*.txt", "*.csv"],
+          "required": false
+        }
+      }
+    },
+    "Curtailment": {
+      "description": "Análises de curtailment",
+      "subdirs": {
+        "Dados": {
+          "file_types": ["*.csv", "*.xlsx"],
+          "required": true
+        },
+        "Output": {
+          "file_types": ["*.png", "*.html", "*.xlsx"],
+          "required": false
+        },
+        "logs": {
+          "file_types": ["*.txt", "*.log"],
+          "required": false
+        }
+      }
+    },
+    "CVU termicas": {
+      "description": "Custo Variável Unitário de térmicas",
+      "subdirs": {
+        "data": {
+          "file_types": ["*.parquet", "*.xlsx"],
+          "required": true
+        },
+        "output": {
+          "file_types": ["*.xlsx", "*.png", "*.txt"],
+          "required": false
+        },
+        "logs": {
+          "file_types": ["*.log"],
+          "required": false
+        }
+      }
+    },
+    "Geracao por usina": {
+      "description": "Dados de geração por usina",
+      "subdirs": {
+        "data": {
+          "file_types": ["*.parquet", "*.csv"],
+          "required": true
+        },
+        "output": {
+          "file_types": ["*.png"],
+          "required": false
+        }
+      }
+    },
+    "mini_dessem": {
+      "description": "Análises do modelo DESSEM",
+      "subdirs": {
+        "data": {
+          "file_types": ["*.csv", "*.parquet"],
+          "required": true
+        },
+        "output/curtailment": {
+          "file_types": ["*.parquet"],
+          "required": false,
+          "note": "Arquivos grandes (>100MB)"
+        },
+        "output/resultados": {
+          "file_types": ["*.csv", "*.xlsx"],
+          "required": false
+        },
+        "output/charts": {
+          "file_types": ["*.png"],
+          "required": false
+        }
+      }
+    },
+    "orquestrador_central": {
+      "description": "Orquestrador central de análises",
+      "subdirs": {
+        "logs": {
+          "file_types": ["*.log"],
+          "required": false
+        }
+      }
+    },
+    "output": {
+      "description": "Outputs gerais do sistema",
+      "subdirs": {
+        "curtailment": {
+          "file_types": ["*.parquet"],
+          "required": false,
+          "note": "Arquivos grandes (>100MB)"
+        }
+      }
+    },
+    "Precos de Energia BR": {
+      "description": "Análises de preços de energia no Brasil",
+      "subdirs": {
+        "Data": {
+          "file_types": ["*.csv", "*.parquet"],
+          "required": true
+        },
+        "charts": {
+          "file_types": ["*.png"],
+          "required": false
+        },
+        "report_out": {
+          "file_types": ["*.html", "*.xlsx"],
+          "required": false
+        }
+      }
+    },
+    "Teste google drive": {
+      "description": "Testes de integração com Google Drive",
+      "subdirs": {
+        "data": {
+          "file_types": ["*.csv", "*.json"],
+          "required": false
+        }
+      }
+    },
+    "Vertimento turbinavel": {
+      "description": "Análises de vertimento turbinável",
+      "subdirs": {
+        "data": {
+          "file_types": ["*.parquet", "*.xlsx"],
+          "required": true
+        }
+      }
+    }
+  },
+  "notes": {
+    "backup_priority": "high",
+    "total_size_estimate": "4.6 GB",
+    "large_files": [
+      "mini_dessem/output/curtailment/curtailment_raw.parquet (315 MB)",
+      "output/curtailment/curtailment_raw.parquet (298 MB)"
+    ],
+    "sync_recommendation": "Use sync_data.py para backup e restore"
+  }
+}

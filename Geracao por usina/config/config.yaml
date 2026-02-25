@@ -1,0 +1,45 @@
+# Configurações do projeto de Geração por Usina
+paths:
+  base_dir: "C:/Users/joao.barbosa/Desktop/Codigos/Codigos ONS/Geracao por usina"
+  data:
+    geracao: "Data/geracao"
+    geracao_base_horaria: "Data/geracao_base_horaria"
+    cadastro: "Data/cadastro"
+  output:
+    charts: "output/charts"
+    reports: "output/reports"
+    data: "output/data"
+
+# URLs para download de dados
+urls:
+  fotovoltaica: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/restricao_coff_fotovoltaica_detail_tm/"
+  eolica: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/restricao_coff_eolica_detail_tm/"
+  geracao_horaria: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/geracao_usina_2_ho/"
+
+# Configurações de download
+download:
+  meses_para_baixar: 2
+  verify_ssl: false
+
+# Configurações de processamento
+processing:
+  anos_analise: [2024, 2025]
+  tipos_usina: ["FOTOVOLTAICA", "EOLICA", "TÉRMICA"]
+
+# Configurações de visualização
+visualization:
+  figsize: [12, 8]
+  dpi: 300
+  save_format: "png"
+  colors:
+    2024: "#1f77b4"
+    2025: "#ff7f0e"
+    p50: "#2ca02c"
+    p90: "#d62728"
+    estimado: "#ff7f0e"
+
+# Configurações de logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/geracao_usina.log"

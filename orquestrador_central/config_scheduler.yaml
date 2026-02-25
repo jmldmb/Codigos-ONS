@@ -1,0 +1,82 @@
+# Configurações do Orquestrador Central
+# ====================================
+
+# Projetos disponíveis - MODO MANUAL APENAS
+secoes:
+  ons:
+    nome: "ONS - Operador Nacional do Sistema"
+    projetos:
+      - nome: "curtailment"
+        descricao: "Sistema de Curtailment"
+        runner_path: "curtailment_runner.py"
+        script_type: "legacy"
+      
+      - nome: "precos_energia" 
+        descricao: "Sistema de Preços de Energia BR"
+        runner_path: "precos_energia_runner.py"
+        script_type: "legacy"
+      
+      - nome: "geracao_usina"
+        descricao: "Geração por Usina - ONS"
+        script_path: "../Geracao por usina/orchestrator.py"
+        script_type: "orchestrator"
+        mode: "full"
+      
+      - nome: "analise_carga"
+        descricao: "Análise de Carga Energética - ONS"
+        script_path: "../Carga/analise_carga.py"
+        script_type: "direct"
+      
+      - nome: "cvu_termicas"
+        descricao: "CVU Térmicas - ONS"
+        script_path: "../CVU termicas/main.py"
+        script_type: "pipeline"
+        mode: "full"
+      
+      - nome: "carga_liquida"
+        descricao: "Análise de Carga Líquida - ONS"
+        script_path: "../carga_liquida/Scripts/carga_liquida.py"
+        script_type: "direct"
+      
+      - nome: "captura_ena"
+        descricao: "Captura ENA - ONS"
+        script_path: "../Captura ENA/main.py"
+        script_type: "direct"
+  
+  agro:
+    nome: "Agro - Commodities e Exportação"
+    projetos:
+      - nome: "secex"
+        descricao: "Exportação - SECEX"
+        script_path: "../../Codigos Agro/SECEX/exportacao.py"
+        script_type: "direct"
+      
+      - nome: "commodities_bbg"
+        descricao: "Commodities Bloomberg"
+        script_path: "../../Codigos Agro/Commodities BBG/main.py"
+        script_type: "direct"
+      
+      - nome: "frete_vidal"
+        descricao: "Frete Vidal"
+        script_path: "../../Codigos Agro/Frete Vidal/frete_vidal.py"
+        script_type: "direct"
+
+# Configurações gerais
+configuracoes:
+  timeout_execucao: 3600  # 1 hora
+  tentativas_repeticao: 3
+  intervalo_tentativas: 300  # 5 minutos
+  
+# Notificações (opcional)
+notificacoes:
+  email:
+    habilitado: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    email_remetente: "seu_email@gmail.com"
+    email_destinatario: "destinatario@email.com"
+  
+  telegram:
+    habilitado: false
+    bot_token: "seu_bot_token"
+    chat_id: "seu_chat_id" 

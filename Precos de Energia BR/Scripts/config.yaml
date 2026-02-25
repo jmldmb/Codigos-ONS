@@ -1,0 +1,42 @@
+charts:
+  - name: pld_se_daily
+    kind: price_daily
+    target_sub: SUDESTE
+    start: "today-30d"
+    end: "today"
+    ma: 7
+
+  - name: spread_ne_daily
+    kind: spread_daily
+    target_sub: NORDESTE
+    start: "today-30d"
+    end: "today"
+    ma: 7
+
+  - name: price_se
+    kind: price
+    target_sub: SUDESTE
+    start: "today-30d"
+    end: "today"
+    ma: 7
+
+  - name: spread_norte_se_daily
+    kind: spread_daily
+    target_sub: NORTE
+    start: "2025-01-01"
+    end: "today"
+    ma: 30
+
+  - name: spread_nordeste_se_longo_daily
+    kind: spread_daily
+    target_sub: NORDESTE
+    start: "2025-01-01"
+    end: "today"
+    ma: 30
+
+  - name: spread_armazenamento_sudeste
+    kind: spread_armazenamento_diario
+    target_sub: SUDESTE
+    start: "2025-01-01"
+    end: "today"
+    ma: 30

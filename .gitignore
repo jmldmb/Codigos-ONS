@@ -1,0 +1,255 @@
+# ============================================================================
+# .gitignore para Codigos ONS
+# Sistema de análises do setor elétrico brasileiro
+# ============================================================================
+
+# ============================================================================
+# DADOS (não versionar arquivos grandes)
+# ============================================================================
+
+# Arquivos de dados
+*.parquet
+*.csv
+*.xls
+*.xlsx
+*.xlsm
+*.db
+*.sqlite
+*.h5
+*.hdf5
+
+# Exceções: Manter arquivos de exemplo pequenos (se houver)
+!**/example*.csv
+!**/sample*.csv
+
+# ============================================================================
+# LOGS E OUTPUTS
+# ============================================================================
+
+# Logs
+*.log
+logs/
+*.txt.log
+
+# Outputs temporários
+output/
+Output/
+outputs/
+charts/*.png
+Charts/*.png
+report_out/
+
+# Exceções: Manter READMEs e documentação
+!README.md
+!**/README.md
+!**/GUIDE.md
+!**/SETUP.md
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+venv_*/
+ENV/
+env/
+.venv
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# ============================================================================
+# IDEs e Editores
+# ============================================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# SISTEMA OPERACIONAL
+# ============================================================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+
+# ============================================================================
+# TEMPORÁRIOS E CACHE
+# ============================================================================
+
+# Arquivos temporários
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# Cache
+.cache/
+*.cache
+
+# ============================================================================
+# CREDENCIAIS E CONFIGURAÇÕES SENSÍVEIS
+# ============================================================================
+
+# Credenciais
+*.key
+*.pem
+credentials.json
+secrets.json
+.env
+.env.local
+
+# Configurações locais (manter templates)
+config_local.yaml
+*_local.yaml
+
+# ============================================================================
+# ARQUIVOS ESPECÍFICOS DO PROJETO
+# ============================================================================
+
+# Dados brutos grandes
+Data/
+data/
+Dados/
+dados/
+raw/
+processed/
+
+# Exceções: Manter estrutura de pastas e pequenos arquivos de configuração
+!Data/.gitkeep
+!data/.gitkeep
+!**/config.yaml
+!**/requirements.txt
+
+# Scripts de teste temporários
+test_*.py
+temp_*.py
+scratch_*.py
+
+# Arquivos de checkpoint
+checkpoint_*.json
+*.checkpoint
+
+# ============================================================================
+# GOOGLE DRIVE / CLOUD
+# ============================================================================
+
+# Arquivos do Google Drive
+.gdrive/
+*.gdoc
+*.gsheet
+
+# ============================================================================
+# BACKUP E SINCRONIZAÇÃO
+# ============================================================================
+
+# Backups locais
+backup/
+backups/
+*.backup
+
+# Arquivos de sincronização (gerados pelo sync_data.py)
+data_manifest.json
+sync_log.txt
+
+# ============================================================================
+# OUTROS
+# ============================================================================
+
+# Arquivos grandes de imagem (manter apenas exemplos)
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Exceções: Manter imagens de documentação
+!docs/**/*.png
+!docs/**/*.jpg
+!README_*.png
+
+# HTML reports
+*.html
+!**/templates/*.html
+
+# Arquivos compactados
+*.zip
+*.tar.gz
+*.rar
+*.7z

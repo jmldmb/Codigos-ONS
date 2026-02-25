@@ -1,0 +1,51 @@
+# Configurações do Projeto CVU Termicas
+
+# URLs dos dados
+data:
+  base_url: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/cvu_usitermica_se/"
+  filename_pattern: "CVU_USINA_TERMICA_{year}.parquet"
+  years:
+    - 2020
+    - 2021
+    - 2022
+    - 2023
+    - 2024
+    - 2025
+
+# Diretórios
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  viz_data: "data/viz"
+  output_charts: "output/charts"
+  output_reports: "output/reports"
+  logs: "logs"
+
+# Configurações de processamento
+processing:
+  chunk_size: 10000
+  max_workers: 4
+  timeout: 300
+
+# Configurações de visualização
+visualization:
+  default_figsize: [12, 8]
+  dpi: 300
+  style: "seaborn-v0_8"
+  colors:
+    primary: "#1f77b4"
+    secondary: "#ff7f0e"
+    tertiary: "#2ca02c"
+
+# Configurações de relatório
+report:
+  template: "templates/report.html.jinja"
+  output_format: "html"
+  include_charts: true
+  include_summary: true
+
+# Configurações de logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/cvu_termicas.log" 

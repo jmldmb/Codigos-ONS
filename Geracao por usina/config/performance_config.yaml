@@ -1,0 +1,56 @@
+# Configurações de Performance para Processamento de Dados
+# Este arquivo contém configurações para otimizar o processamento de grandes datasets
+
+# Limites de tamanho para diferentes formatos de arquivo
+file_limits:
+  excel:
+    max_rows: 1000000  # Limite seguro do Excel
+    max_cols: 16384
+    sample_size: 10000  # Tamanho da amostra para Excel quando dados são muito grandes
+  
+  csv:
+    max_rows: 10000000  # Limite mais alto para CSV
+    chunk_size: 100000  # Tamanho do chunk para processamento em lotes
+
+# Configurações de processamento
+processing:
+  # Filtros para reduzir volume de dados
+  filters:
+    min_geracao_value: 0.1  # Valor mínimo de geração para considerar
+    max_missing_percentage: 50  # Máximo de dados faltantes permitido (%)
+  
+  # Agregações para resumos
+  aggregations:
+    time_granularity: "monthly"  # Granularidade temporal (hourly, daily, monthly)
+    include_stats: true  # Incluir estatísticas (média, desvio padrão, etc.)
+  
+  # Otimizações de memória
+  memory:
+    use_categorical: true  # Usar tipos categóricos para strings
+    downcast_numeric: true  # Reduzir precisão de números quando possível
+    chunk_processing: true  # Processar em chunks para grandes datasets
+
+# Configurações de saída
+output:
+  # Formatos de arquivo preferidos por tamanho
+  formats:
+    small_datasets: ["xlsx", "csv"]  # < 100k linhas
+    medium_datasets: ["csv", "xlsx_sample"]  # 100k - 1M linhas
+    large_datasets: ["csv", "parquet", "xlsx_sample"]  # > 1M linhas
+  
+  # Configurações de amostragem
+  sampling:
+    enabled: true
+    method: "random"  # random, systematic, stratified
+    seed: 42  # Seed para reprodutibilidade
+  
+  # Configurações de compressão
+  compression:
+    csv: "gzip"  # gzip, bz2, zip
+    parquet: "snappy"  # snappy, gzip, brotli
+
+# Configurações de logging para performance
+logging:
+  performance_metrics: true  # Log de métricas de performance
+  memory_usage: true  # Log de uso de memória
+  processing_time: true  # Log de tempo de processamento

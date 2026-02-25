@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Relatório Diário – {{ date }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    h1   { text-align: center; }
+    img  { width: 100%; page-break-inside: avoid; margin-bottom: 20px; }
+    .chart-block { page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <h1>Relatório Diário – {{ date }}</h1>
+
+  {% for img in images %}
+  <div class="chart-block">
+    <h2>{{ img.title }}</h2>
+    <img src="{{ img.path }}" alt="{{ img.title }}">
+  </div>
+  {% endfor %}
+</body>
+</html>

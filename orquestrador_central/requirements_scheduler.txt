@@ -1,0 +1,3 @@
+# Dependências do Orquestrador Central
+schedule>=1.2.0
+PyYAML>=6.0 

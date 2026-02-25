@@ -1,0 +1,15 @@
+Date: 5/8/2025
+Time: 16:36
+Phone Number: +5511999999999
+Message: 🤖 Teste de Automação WhatsAppData/Hora: 05/08/2025 16:36:15Esta é uma mensagem de teste para verificar a integração com WhatsApp.Posteriormente será usado para envio de relatórios.✅ Sistema funcionando corretamente!
+--------------------
+Date: 5/8/2025
+Time: 16:45
+Phone Number: +5511999999999
+Message: 🤖 Teste de Automação WhatsAppData/Hora: 05/08/2025 16:45:08Esta é uma mensagem de teste para verificar a integração com WhatsApp.Posteriormente será usado para envio de relatórios.✅ Sistema funcionando corretamente!
+--------------------
+Date: 5/8/2025
+Time: 16:47
+Phone Number: +5511999999999
+Message: 🤖 Teste de Automação WhatsAppData/Hora: 05/08/2025 16:47:17Esta é uma mensagem de teste para verificar a integração com WhatsApp.Posteriormente será usado para envio de relatórios.✅ Sistema funcionando corretamente!
+--------------------
