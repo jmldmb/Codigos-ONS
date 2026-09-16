@@ -192,6 +192,9 @@ dados/
 raw/
 processed/
 
+# Exceções: código-fonte em pastas chamadas dados/ (não são dados)
+!**/src/**/dados/
+
 # Exceções: Manter estrutura de pastas e pequenos arquivos de configuração
 !Data/.gitkeep
 !data/.gitkeep

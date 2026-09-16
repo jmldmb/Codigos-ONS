@@ -1,0 +1,9 @@
+pandas>=2.0
+pyarrow
+numpy
+scipy
+matplotlib
+seaborn
+openpyxl
+pyyaml
+requests

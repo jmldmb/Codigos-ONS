@@ -8,10 +8,9 @@ Este repositório contém um conjunto integrado de ferramentas e análises para 
 
 - **Captura ENA**: Coleta e análise de Energia Natural Afluente
 - **Análise de Carga**: Processamento e visualização de dados de carga do sistema
-- **Carga Líquida**: Análises de carga líquida considerando geração distribuída
+- **Carga Líquida**: carga líquida observada do SIN (Hidro R + térmica flexível) × CMO/curtailment, e o simulador Monte Carlo horário (ex-Mini DESSEM) validado contra ela
 - **Curtailment**: Análises de cortes de geração renovável
 - **CVU Térmicas**: Cálculo e análise de Custo Variável Unitário de usinas térmicas
-- **Mini DESSEM**: Análises baseadas no modelo de despacho DESSEM
 - **Preços de Energia**: Análises de preços spot e contratos
 - **Vertimento Turbinável**: Análises de vertimento em usinas hidrelétricas
 - **Orquestrador Central**: Sistema de coordenação de análises
@@ -70,9 +69,10 @@ Codigos-ONS/
 │   ├── config.yaml
 │   └── Data/                 # Dados (não versionado)
 │
-├── carga_liquida/            # Carga líquida
-│   ├── Scripts/
-│   └── Data/                 # Dados (não versionado)
+├── carga_liquida/            # Carga líquida (pacote: run.py, config/, src/carga_liquida/, legacy/)
+│   ├── src/carga_liquida/    # dados/ (ONS) · observado/ (cálculo + análises) · modelo/ e validacao/ (etapa 2)
+│   ├── Data/                 # Dados (não versionado)
+│   └── README.md
 │
 ├── Curtailment/              # Análises de curtailment
 │   ├── Scripts/
@@ -81,10 +81,6 @@ Codigos-ONS/
 ├── CVU termicas/             # CVU de térmicas
 │   ├── main.py
 │   ├── scripts/
-│   └── data/                 # Dados (não versionado)
-│
-├── mini_dessem/              # Análises DESSEM
-│   ├── Scripts/
 │   └── data/                 # Dados (não versionado)
 │
 ├── Precos de Energia BR/     # Análises de preços
@@ -130,14 +126,6 @@ Cálculo e análise de Custo Variável Unitário de usinas térmicas.
 - Cálculo de CVU por usina
 - Análise de mérito de despacho
 - Visualizações de ordem de mérito
-
-### Mini DESSEM
-Análises baseadas no modelo de despacho de curto prazo.
-
-**Principais funcionalidades:**
-- Processamento de resultados DESSEM
-- Análise de despacho horário
-- Geração de relatórios operacionais
 
 ## 📊 Sincronização de Dados
 
