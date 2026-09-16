@@ -4,6 +4,7 @@ Substitui os 13 scripts de comparação/backtest do carga_liquida antigo. Alinha
 cenários simulados com o observado e mede erro por componente:
 
     carga (balanço)  eólica pós-corte  solar pós-corte  hidro FD  hidro R  térmica flexível  carga líquida
+    e o PLD simulado contra o CMO observado (subsistema de config.carga_liquida.cmo_subsistema).
 
 Saídas em Output/validacao/: comparacao_horaria.csv, metricas.csv, metricas_por_ano_mes.csv e gráficos.
 """
@@ -30,6 +31,7 @@ COMPONENTES = [
     ("hidro_r", "R", "val_gerhidro_reservatorio"),
     ("termica_flex", "termica_flexivel", "val_term_despacho"),
     ("carga_liquida", "carga_liquida_historica", "carga_liquida"),
+    ("pld_vs_cmo", "cmo_obs", "pld"),
 ]
 
 
@@ -44,10 +46,13 @@ def montar_comparacao() -> pd.DataFrame:
     if load_config()["modelo"].get("carga_inclui_intercambio", True):
         bal = bal.assign(val_carga=bal["val_carga"] + bal["val_intercambio"].fillna(0.0))
     bal = bal[["din_instante", "val_carga"]].rename(columns={"val_carga": "carga_obs"})
-    obs = obs.merge(ger, on="din_instante", how="left").merge(bal, on="din_instante", how="left")
+    cmo = ons.carregar_cmo()
+    cmo["din_instante"] = cmo["din_instante"].dt.floor("h")
+    cmo = cmo.groupby("din_instante", as_index=False)["val_cmo"].mean().rename(columns={"val_cmo": "cmo_obs"})
+    obs = obs.merge(ger, on="din_instante", how="left").merge(bal, on="din_instante", how="left").merge(cmo, on="din_instante", how="left")
 
     sim = simulacao.carregar_resultados()
-    cols_sim = [c for _, _, c in COMPONENTES] + ["curtailment", "pld"]
+    cols_sim = list(dict.fromkeys([c for _, _, c in COMPONENTES] + ["curtailment"]))
     agg = sim.groupby("din_instante")[cols_sim].mean()
     q = sim.groupby("din_instante")["carga_liquida"].quantile([0.1, 0.9]).unstack()
     agg["carga_liquida_p10"], agg["carga_liquida_p90"] = q[0.1], q[0.9]
@@ -93,12 +98,12 @@ def validar():
     # 1. médias mensais observado vs simulado, por componente
     mens = df.groupby(["ano", "mes"]).mean(numeric_only=True).reset_index()
     mens["t"] = pd.to_datetime(mens[["ano", "mes"]].assign(day=1).rename(columns={"ano": "year", "mes": "month"}))
-    fig, axes = plt.subplots(4, 2, figsize=(18, 18))
+    fig, axes = plt.subplots(3, 3, figsize=(22, 16))
     fig.suptitle("Médias mensais: observado vs simulado", fontsize=16, fontweight="bold")
     for ax, (rot, o, s) in zip(axes.flatten(), COMPONENTES):
-        ax.plot(mens["t"], mens[o], "o-", color="black", label="observado")
-        ax.plot(mens["t"], mens[s], "s--", color="tab:red", label="simulado")
-        ax.set(title=rot, ylabel="MW")
+        ax.plot(mens["t"], mens[o], "o-", color="black", label="observado" if rot != "pld_vs_cmo" else "CMO observado")
+        ax.plot(mens["t"], mens[s], "s--", color="tab:red", label="simulado" if rot != "pld_vs_cmo" else "PLD simulado")
+        ax.set(title=rot, ylabel="R$/MWh" if rot == "pld_vs_cmo" else "MW")
         ax.legend()
     ax = axes.flatten()[-1]
     ax.plot(mens["t"], mens["curtailment"], "s--", color="tab:red", label="curtailment simulado")
@@ -141,7 +146,7 @@ def validar():
 
     # 4. decomposição do erro da carga líquida por componente (média mensal do erro)
     # CL = carga − eólica − solar − inflex − FD  =>  erro_CL ≈ erro_carga − erro_eólica − erro_solar − erro_FD (inflex fixo)
-    dec = df.groupby(["ano", "mes"])[["erro_carga", "erro_eolica", "erro_solar", "erro_hidro_fd", "erro_carga_liquida"]].mean().reset_index()
+    dec = df.groupby(["ano", "mes"])[["erro_carga", "erro_eolica", "erro_solar", "erro_hidro_fd", "erro_carga_liquida"]].mean().reset_index()  # noqa: E501
     dec["t"] = pd.to_datetime(dec[["ano", "mes"]].assign(day=1).rename(columns={"ano": "year", "mes": "month"}))
     contrib = pd.DataFrame({"carga": dec["erro_carga"], "eólica (−)": -dec["erro_eolica"], "solar (−)": -dec["erro_solar"],
                             "hidro FD (−)": -dec["erro_hidro_fd"]}, index=dec["t"])

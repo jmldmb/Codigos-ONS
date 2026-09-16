@@ -6,7 +6,7 @@ from .config import get_logger, load_config
 logger = get_logger("cli")
 
 ANALISES = ("hidro", "cmo", "diarios", "curtailment")
-TREINOS = ("eolica", "solar", "carga", "hidro_fd")
+TREINOS = ("eolica", "solar", "carga", "hidro_fd", "pilha")
 
 
 def _validar(valores, validos, rotulo):
@@ -39,10 +39,11 @@ def cmd_processar(args):
 
 
 def cmd_treinar(args):
-    from .modelo import hidro_fd
+    from .modelo import hidro_fd, pilha_termica
     from .modelo.samplers import carga, eolica, solar
     _validar(args.samplers, TREINOS, "sampler")
-    fn = {"eolica": eolica.treinar, "solar": solar.treinar, "carga": carga.treinar, "hidro_fd": hidro_fd.calibrar}
+    fn = {"eolica": eolica.treinar, "solar": solar.treinar, "carga": carga.treinar, "hidro_fd": hidro_fd.calibrar,
+          "pilha": lambda: pilha_termica.montar_todas(rebuild=True)}
     for nome in args.samplers or list(TREINOS):
         logger.info(f"=== treinar: {nome}")
         fn[nome]()
@@ -98,7 +99,7 @@ def main(argv=None):
     s.add_argument("analises", nargs="*", metavar="ANALISE", help=f"quais (default: todas): {', '.join(ANALISES)}")
     s.set_defaults(func=cmd_analisar)
 
-    s = sub.add_parser("treinar", help="treina os samplers (eólica, solar, carga v6) e calibra a regressão hidro FD")
+    s = sub.add_parser("treinar", help="treina os samplers (eólica, solar, carga v6), calibra a regressão hidro FD e monta as pilhas térmicas")
     s.add_argument("samplers", nargs="*", metavar="SAMPLER", help=f"quais (default: todos): {', '.join(TREINOS)}")
     s.set_defaults(func=cmd_treinar)
 

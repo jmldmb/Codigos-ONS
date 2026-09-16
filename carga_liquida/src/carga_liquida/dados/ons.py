@@ -61,13 +61,13 @@ def iterar_geracao_usina(colunas: list[str] | None = None,
         yield _filtrar_periodo(df, inicio, fim)
 
 
-def iterar_termica_despacho(colunas: list[str],
-                            inicio: str | None = None, fim: str | None = None) -> Iterator[pd.DataFrame]:
-    """Itera os arquivos mensais de despacho térmico (colunas `val_*` convertidas para float)."""
+def iterar_termica_despacho(colunas: list[str], inicio: str | None = None, fim: str | None = None,
+                            colunas_extra: list[str] | None = None) -> Iterator[pd.DataFrame]:
+    """Itera os arquivos mensais de despacho térmico (colunas `val_*` convertidas para float; `colunas_extra` como estão)."""
     ini, end = periodo()
     inicio, fim = inicio or ini, fim or end
     for p in _arquivos("termica_despacho", inicio, fim):
-        df = pd.read_parquet(p, columns=["din_instante", *colunas])
+        df = pd.read_parquet(p, columns=["din_instante", *colunas, *(colunas_extra or [])])
         for c in colunas:
             df[c] = pd.to_numeric(df[c], errors="coerce")
         yield _filtrar_periodo(df, inicio, fim)
@@ -85,6 +85,19 @@ def carregar_cmo(subsistema: str | None = None,
     df["val_cmo"] = pd.to_numeric(df["val_cmo"], errors="coerce")
     df = _filtrar_periodo(df, inicio, fim)
     return df[["din_instante", "val_cmo"]].sort_values("din_instante").reset_index(drop=True)
+
+
+def carregar_cvu(inicio: str | None = None, fim: str | None = None) -> pd.DataFrame:
+    """CVU semanal por usina térmica (dat_iniciosemana, num_revisao, cod_usinaplanejamento, nom_usina, val_cvu)."""
+    ini, end = periodo()
+    inicio, fim = inicio or ini, fim or end
+    df = pd.concat([pd.read_parquet(p) for p in _arquivos("cvu", inicio, fim)], ignore_index=True)
+    df["dat_iniciosemana"] = pd.to_datetime(df["dat_iniciosemana"])
+    df["val_cvu"] = pd.to_numeric(df["val_cvu"], errors="coerce")
+    df = df.dropna(subset=["cod_usinaplanejamento", "val_cvu"])
+    df["cod_usinaplanejamento"] = df["cod_usinaplanejamento"].astype(int)
+    df = df[(df["dat_iniciosemana"] >= inicio) & (df["dat_iniciosemana"] <= fim)]
+    return df[["dat_iniciosemana", "num_revisao", "cod_usinaplanejamento", "nom_usina", "val_cvu"]].reset_index(drop=True)
 
 
 def carregar_cadastro() -> pd.DataFrame:
