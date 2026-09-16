@@ -84,7 +84,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                         "val_gersolar_cent": cent[h], "val_gersolar_dist": dist[h], "val_gersolar": cent[h] + dist[h],
                         "val_inflexterm": r.inflexterm, "ENA_arm": r.ena_armazenavel, "temp_c": temp_h[h] if temp_h else np.nan,
                         **res, "val_gerhidro_total": res["val_gerhidro_reservatorio"] + res["val_gerhidro_fd"],
-                        "carga_liquida": cl_, "pld": precos.pld(res["val_term_despacho"]),
+                        "carga_liquida": cl_, "pld": precos.pld(res["val_term_despacho"], ano, mes),
                     })
                 feitas += 24
             if verbose and sim == n_sim:

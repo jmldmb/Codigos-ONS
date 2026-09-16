@@ -35,6 +35,11 @@ datasets:
     dir: "raw/ENA"
     freq: yearly
     start: "2022"
+  cvu:                  # CVU semanal por usina térmica (PMO e revisões), com cod_usinaplanejamento
+    path: "cvu_usitermica_se/CVU_USINA_TERMICA_{y}.parquet"
+    dir: "raw/CVU"
+    freq: yearly
+    start: "2022"
   coff_eolica:          # constrained-off eólico por conjunto, semi-horário, com razão/origem (desde 2023-10)
     path: "restricao_coff_eolica_tm/RESTRICAO_COFF_EOLICA_{y}_{m}.parquet"
     dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_eolica"
@@ -159,7 +164,12 @@ modelo:
   solar_share_centralizada_default: 0.36  # meses sem dado de MMGD (2022): fração centralizada do total
   # Preço
   pld_minimo: 61
-  pilha_termica: null                     # xlsx com aba 'pilha_term' (potencia acumulada MW, cvu R$/MWh); null = pilha de exemplo
+  # Pilha térmica (merit order) mensal montada dos dados: CVU da última semana do mês (dataset cvu) x
+  # capacidade disponível por usina (máximo da geração verificada nos últimos N meses, dataset termica_despacho),
+  # casadas por cod_usinaplanejamento. Meses sem dado usam a pilha mais recente. Alternativamente, um xlsx
+  # com aba 'pilha_term' (potencia acumulada MW, cvu R$/MWh) em pilha_termica_xlsx substitui tudo.
+  pilha_capacidade_meses: 12
+  pilha_termica_xlsx: null
   # Simulação
   num_simulacoes: 6                       # cenários (meses completos) por mês/ano
   anos: [2022, 2023, 2024, 2025, 2026, 2027, 2028]

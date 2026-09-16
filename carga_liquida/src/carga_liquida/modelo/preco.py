@@ -3,8 +3,8 @@
     PLD = CVU da primeira usina da pilha cuja potência acumulada >= térmica_flex + inflexterm_adicional
           (se térmica_flex > 200 MW); senão CVU no ponto do adicional, com piso pld_minimo.
 
-A pilha real (xlsx com aba 'pilha_term': potencia acumulada MW, cvu R$/MWh) vem do módulo CVU
-térmicas; sem ela usa-se a pilha de exemplo abaixo (config.modelo.pilha_termica = null).
+A pilha de cada mês vem de modelo/pilha_termica.py (CVU semanal x capacidade, dados ONS). Um xlsx com
+aba 'pilha_term' (config.modelo.pilha_termica_xlsx) substitui todas; sem nenhum dos dois, pilha de exemplo.
 """
 from pathlib import Path
 
@@ -21,9 +21,9 @@ PILHA_EXEMPLO = pd.DataFrame({
 })
 
 
-def carregar_pilha(path: str | Path | None = None) -> pd.DataFrame:
+def carregar_pilha_xlsx(path: str | Path | None = None) -> pd.DataFrame | None:
     cfg = load_config()["modelo"]
-    path = path or cfg.get("pilha_termica")
+    path = path or cfg.get("pilha_termica_xlsx")
     if path:
         p = Path(path)
         p = p if p.is_absolute() else ROOT / p
@@ -34,25 +34,45 @@ def carregar_pilha(path: str | Path | None = None) -> pd.DataFrame:
             logger.warning(f"Pilha térmica sem colunas potencia/cvu: {p}")
         else:
             logger.warning(f"Pilha térmica não encontrada: {p}")
-    logger.warning("Usando pilha térmica de EXEMPLO (PLD ilustrativo)")
-    return PILHA_EXEMPLO.copy()
+    return None
 
 
 class Precificador:
+    """pld(termica_flex, ano, mes): usa a pilha fixa (xlsx/DataFrame) se houver, senão a pilha mensal dos dados."""
+
     def __init__(self, pilha: pd.DataFrame | None = None):
         cfg = load_config()["modelo"]
         self.pld_min = cfg["pld_minimo"]
         self.adicional = cfg["inflexterm_adicional_mw"]
-        p = pilha if pilha is not None else carregar_pilha()
-        self.pot, self.cvu = p["potencia"].values.astype(float), p["cvu"].values.astype(float)
+        self.fixa = pilha if pilha is not None else carregar_pilha_xlsx()
+        if self.fixa is None:
+            try:
+                from .pilha_termica import montar_todas
+                montar_todas()
+            except FileNotFoundError as e:
+                logger.warning(f"{e}; usando pilha térmica de EXEMPLO (PLD ilustrativo)")
+                self.fixa = PILHA_EXEMPLO.copy()
+        self._cache = {}
 
-    def cvu_no_ponto(self, potencia: float) -> float:
+    def _pilha(self, ano: int, mes: int) -> tuple[np.ndarray, np.ndarray]:
+        key = None if self.fixa is not None else (ano, mes)
+        if key not in self._cache:
+            if self.fixa is not None:
+                p = self.fixa
+            else:
+                from .pilha_termica import pilha
+                p = pilha(ano, mes)
+            self._cache[key] = (p["potencia"].values.astype(float), p["cvu"].values.astype(float))
+        return self._cache[key]
+
+    def cvu_no_ponto(self, potencia: float, ano: int = 0, mes: int = 0) -> float:
         if potencia <= 0:
             return self.pld_min
-        i = np.searchsorted(self.pot, potencia, side="left")  # primeira potência acumulada >= input
-        return float(self.cvu[i]) if i < len(self.cvu) else float(self.cvu.max())
+        pot, cvu = self._pilha(ano, mes)
+        i = np.searchsorted(pot, potencia, side="left")  # primeira potência acumulada >= input
+        return float(cvu[i]) if i < len(cvu) else float(cvu.max())
 
-    def pld(self, termica_flex: float) -> float:
+    def pld(self, termica_flex: float, ano: int = 0, mes: int = 0) -> float:
         if termica_flex > 200:
-            return self.cvu_no_ponto(termica_flex + self.adicional)
-        return max(self.cvu_no_ponto(self.adicional), self.pld_min)
+            return self.cvu_no_ponto(termica_flex + self.adicional, ano, mes)
+        return max(self.cvu_no_ponto(self.adicional, ano, mes), self.pld_min)

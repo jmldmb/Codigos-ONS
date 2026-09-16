@@ -36,7 +36,8 @@ carga_liquida/
 │   │   ├── samplers/           carga v6 (temperatura), eólica AR(1), solar cent/dist — treino + amostragem
 │   │   ├── hidro_fd.py         regressão FD = f(R, ENA, mês, hora, tipo de dia) + calibração OLS
 │   │   ├── despacho.py         balanço horário: R máximo, brentq, curtailment em cascata, térmica flexível
-│   │   ├── preco.py            PLD pela pilha térmica
+│   │   ├── pilha_termica.py    merit order mensal: CVU semanal (ONS) x capacidade por usina
+│   │   ├── preco.py            PLD pela pilha térmica do mês
 │   │   ├── simulacao.py        Monte Carlo (ano × mês × cenário × dia × hora)
 │   │   └── feriados.py         feriados nacionais calculados; tipo de dia DU/FDS
 │   ├── validacao/comparar.py   observado vs simulado por componente (métricas + gráficos)
@@ -55,7 +56,7 @@ pip install -r requirements.txt
 python run.py baixar                 # só o que falta: geracao_usina, termica_despacho, cmo, balanco, ena, coff_*, temperatura
 python run.py processar              # Data/raw -> Output/observado/*.parquet (~30 s) + temperatura processada
 python run.py analisar               # observado: hidro cmo diarios curtailment
-python run.py treinar                # samplers eolica solar carga + calibração hidro_fd -> Output/modelo/params/ (~10 s)
+python run.py treinar                # samplers eolica solar carga + hidro_fd + pilhas térmicas -> Output/modelo/ (~40 s)
 python run.py simular --anos 2024 2025 -n 6 --seed 42   # Monte Carlo -> Output/modelo/ (~4 s por ano)
 python run.py validar                # observado vs simulado -> Output/validacao/
 python run.py tudo                   # tudo acima, em ordem
@@ -89,6 +90,7 @@ prem = premissas.montar()                    # tabela (ano, mês): carga, eólic
 | `ena` | ONS `ena_subsistema_di` (anual) | `Data/raw/ENA/` | ENA armazenável diária (soma SIN) |
 | `coff_eolica`, `coff_fotovoltaica` | ONS `restricao_coff_*_tm` (mensal) | `baterias/Data/coff_*` (reaproveitado) | curtailment e potencial renovável |
 | `temperatura` | Meteostat bulk (NOAA ISD/SYNOP), 15 aeroportos | `Data/raw/temperatura/` | perfil horário da carga (sampler v6) |
+| `cvu` | ONS `cvu_usitermica_se` (anual) | `Data/raw/CVU/` | CVU semanal por usina → pilha térmica |
 
 Saídas em `Output/`:
 
@@ -98,7 +100,7 @@ Saídas em `Output/`:
 - `diarios/` — últimos N dias: despacho térmico empilhado por componente; geração por tipo + carga líquida
 - `curtailment/` — scatters CL×curtailment por ano/mês, `carga_liquida_curtailment.csv`, `resumo_mensal.csv`
 - `modelo/params/` — `eolica.json`, `solar_centralizada.json`, `solar_distribuida.json`, `carga_v6.json`, `hidro_fd.json`
-- `modelo/` — `resultados_simulacao.parquet` (cenário × dia × hora), `resumo_mensal.csv`
+- `modelo/` — `resultados_simulacao.parquet` (cenário × dia × hora), `resumo_mensal.csv`, `pilhas_termicas.csv`
 - `validacao/` — `metricas.csv`, `metricas_por_ano_mes.csv`, `comparacao_horaria.csv`, gráficos (médias mensais,
   perfil horário por mês com faixa P10–P90, dispersão, decomposição do erro, erro por hora)
 
@@ -113,7 +115,7 @@ Mesma identidade nos dois lados: **observado** `R + térmica_flex` ≡ **simulad
 | Solar | perfil determinístico por mês; centralizada (expoente 1,5) e distribuída (1,0) | COFF FV / geração usina não-MMGD; MMGD |
 | Hidro FD | `FD = c + 0,364·R + 0,108·ENA + mês + hora + FDS` (OLS; legado 0,33 / 0,15) | histórico FD/R + ENA diária; MAE 1,7 GW, R² 0,91 |
 | Despacho | R até 42 GW; excesso → reduz R até 14,5 GW (brentq), depois corta eólica + solar cent. pro rata e por fim MMGD; déficit → térmica | — |
-| PLD | CVU da pilha térmica no ponto `térmica_flex + 3.500 MW`, piso 61 | pilha real via `config.modelo.pilha_termica` (hoje: exemplo) |
+| PLD | CVU da pilha térmica do mês no ponto `térmica_flex + 3.500 MW`, piso 61 | pilha mensal = CVU semanal × capacidade (máx. geração verificada em 12 meses), casadas por `cod_usinaplanejamento`; ~23 GW flexíveis |
 
 Premissas mensais (`modelo/premissas.py`): nos anos observados tudo vem dos dados — carga (+ exportação),
 eólica potencial, solar cent/dist, ENA armazenável SIN, térmica total (o `data.py` do legado era uma cópia
@@ -129,12 +131,14 @@ manual do BALANCO_ENERGIA). Para 2026-28, `config/projecoes.yaml`.
 | hidro FD | 23.627 | 23.749 | +122 | 1.777 | 7,5 % | 0,90 |
 | hidro R | 25.131 | 25.477 | +346 | 2.707 | 10,8 % | 0,74 |
 | térmica flexível | 1.039 | 2 | −1.036 | 1.038 | — | — |
-| **carga líquida** | **26.170** | **25.480** | **−690** | **2.887** | **11,0 %** | **0,71** |
+| **carga líquida** | **26.170** | **25.454** | **−716** | **2.879** | **11,0 %** | **0,71** |
+| PLD vs CMO SE (R$/MWh) | 91 | 111 | +20 | 117 | — | 0,01 |
 
 Limitações estruturais (visíveis em `validacao/perfil_horario_carga_liquida.png`): o despacho só usa
 térmica flexível quando a hidro bate no limite, então a térmica flexível observada (ex.: 5–6 GW em
 set–out/2024, por segurança energética) aparece no simulado como R; e o curtailment simulado (~0,7 GW) é
-só o energético — o de rede (CNF/REL, a maior parte hoje) não é modelado.
+só o energético — o de rede (CNF/REL, a maior parte hoje) não é modelado. Pela mesma razão o PLD simulado
+é quase constante dentro do mês (≈ CVU no ponto dos 3.500 MW): não captura a dinâmica horária do CMO.
 
 ## Premissas embutidas (herdadas do código original)
 
@@ -163,8 +167,13 @@ só o energético — o de rede (CNF/REL, a maior parte hoje) não é modelado.
 - **Cascata de curtailment**: quando eólica + solar centralizada = 0, o legado não cortava nada; aqui a distribuída é cortada.
 - `data.py` (dicionários manuais) → `premissas.py` (dados) + `projecoes.yaml`; feriados calculados em vez de tabela 2023-25.
 
+- **Pilha térmica** montada dos dados ONS (`cvu_usitermica_se` + despacho térmico) em vez das planilhas manuais
+  do módulo CVU térmicas (equivalência de nomes, indisponibilidade, exceções); ficam de fora ~0,8 GW sem CVU
+  (Norte Fluminense, despacho contratual). Um xlsx em `config.modelo.pilha_termica_xlsx` ainda pode substituir.
+
 ## Pendências
 
-- Pilha térmica real (módulo `CVU termicas/`) para o PLD deixar de ser ilustrativo.
-- Baixar geração por usina / térmica de 2026 (`python run.py baixar`) para estender o observado.
 - Fontes das projeções 2026-28 em `projecoes.yaml` (herdadas sem documentação).
+- 5 UHEs pequenas sem classificação R/FD no cadastro (~50 MW): Alto Jatapu, Conj. Barreiras, Eng. Dreher,
+  Eng. Kotzian, Juruena.
+- Despacho de térmica flexível por decisão energética (não só por limite de capacidade) — mudança de modelo.
