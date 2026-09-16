@@ -11,7 +11,7 @@ reserva, GSUB).
 
 Saídas (Output/observado/):
     carga_liquida_historica.parquet  din_instante, FD, R, termica_flexivel, carga_liquida_historica, ano, mes, dia, hora
-    geracao_por_tipo.parquet         geração horária por tipo de usina (hidro aberta em FD/R)
+    geracao_por_tipo.parquet         geração horária por tipo de usina (hidro aberta em FD/R, solar em MMGD)
     termica_componentes.parquet      geração térmica horária por componente de despacho
 """
 import pandas as pd
@@ -28,14 +28,15 @@ ARQ_TERMICA = "termica_componentes.parquet"
 
 
 def geracao_por_tipo(cadastro: pd.DataFrame) -> pd.DataFrame:
-    """Geração horária do SIN por tipo de usina, com a hidrelétrica aberta em 'HIDROELÉTRICA - FD' e '- R'.
+    """Geração horária do SIN por tipo de usina, com a hidrelétrica aberta em 'HIDROELÉTRICA - FD' e '- R'
+    e a solar em 'FOTOVOLTAICA' (centralizada) e 'FOTOVOLTAICA - MMGD' (distribuída).
 
     UHEs ausentes do cadastro ficam em 'HIDROELÉTRICA' (sem sufixo) e são listadas no log.
     """
     cfg = load_config()["carga_liquida"]
-    tipo_hidro = cfg["tipo_usina_hidro"]
+    tipo_hidro, tipo_solar = cfg["tipo_usina_hidro"], cfg["tipo_usina_solar"]
     partes, sem_cadastro = [], set()
-    for df in ons.iterar_geracao_usina():
+    for df in ons.iterar_geracao_usina(["din_instante", "nom_tipousina", "nom_usina", "cod_modalidadeoperacao", "val_geracao"]):
         eh_hidro = df["nom_tipousina"] == tipo_hidro
         df = df.merge(cadastro, on="nom_usina", how="left")
         sem = eh_hidro & df["classificacao"].isna()
@@ -43,6 +44,8 @@ def geracao_por_tipo(cadastro: pd.DataFrame) -> pd.DataFrame:
         df["tipo"] = df["nom_tipousina"]
         com_classe = eh_hidro & df["classificacao"].notna()
         df.loc[com_classe, "tipo"] = tipo_hidro + " - " + df.loc[com_classe, "classificacao"]
+        mmgd = (df["nom_tipousina"] == tipo_solar) & df["cod_modalidadeoperacao"].astype(str).str.contains("MMGD", case=False)
+        df.loc[mmgd, "tipo"] = tipo_solar + " - MMGD"
         partes.append(df.groupby(["din_instante", "tipo"], as_index=False)["val_geracao"].sum())
     if sem_cadastro:
         logger.warning(f"{len(sem_cadastro)} UHEs sem classificação no cadastro (ficam fora de FD/R): "

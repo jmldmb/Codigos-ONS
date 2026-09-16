@@ -50,7 +50,8 @@ def output_dir(sub: str | None = None) -> Path:
 
 def dataset_dir(name: str) -> Path:
     """Pasta local de um dataset ONS registrado em config.datasets."""
-    p = data_dir() / load_config()["datasets"][name]["dir"]
+    d = Path(load_config()["datasets"][name]["dir"])
+    p = d if d.is_absolute() else data_dir() / d
     p.mkdir(parents=True, exist_ok=True)
     return p
 

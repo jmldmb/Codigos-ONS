@@ -4,12 +4,10 @@
 paths:
   data_dir: "C:/Users/joaom/Codigos/Codigos-ONS/carga_liquida/Data"
   output_dir: "Output"          # relativo à raiz do projeto (carga_liquida/)
-  # Dados já baixados pelo módulo baterias/ (reaproveitados, não re-baixados)
-  coff_eolica_dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_eolica"
-  coff_fotovoltaica_dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_fotovoltaica"
 
 # Fontes ONS (open data S3). {y}=ano, {m}=mês com 2 dígitos. `dir` é relativo a paths.data_dir
-# (os nomes preservam o layout Data/raw/... já existente no disco).
+# (os nomes preservam o layout Data/raw/... já existente no disco); `dir` absoluto reaproveita
+# pastas já baixadas por outros módulos (baterias/), sem re-baixar.
 ons_base: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/"
 datasets:
   geracao_usina:        # geração horária verificada por usina (todos os tipos, inclui MMGD)
@@ -27,6 +25,26 @@ datasets:
     dir: "raw/CMO"
     freq: yearly
     start: "2022"
+  balanco:              # balanço de energia horário por subsistema (+ linha SIN): carga, hidro, térmica, eólica, solar
+    path: "balanco_energia_subsistema_ho/BALANCO_ENERGIA_SUBSISTEMA_{y}.parquet"
+    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/balanco"
+    freq: yearly
+    start: "2022"
+  ena:                  # ENA diária por subsistema (bruta e armazenável, MWmed e %MLT)
+    path: "ena_subsistema_di/ENA_DIARIO_SUBSISTEMA_{y}.parquet"
+    dir: "raw/ENA"
+    freq: yearly
+    start: "2022"
+  coff_eolica:          # constrained-off eólico por conjunto, semi-horário, com razão/origem (desde 2023-10)
+    path: "restricao_coff_eolica_tm/RESTRICAO_COFF_EOLICA_{y}_{m}.parquet"
+    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_eolica"
+    freq: monthly
+    start: "2023-10"
+  coff_fotovoltaica:    # idem solar centralizada (desde 2024-04)
+    path: "restricao_coff_fotovoltaica_tm/RESTRICAO_COFF_FOTOVOLTAICA_{y}_{m}.parquet"
+    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_fotovoltaica"
+    freq: monthly
+    start: "2024-04"
 
 download:
   verify_ssl: false
@@ -52,6 +70,7 @@ periodo:
 #   termica_flexivel = soma das componentes abaixo (geração verificada)
 carga_liquida:
   tipo_usina_hidro: "HIDROELÉTRICA"
+  tipo_usina_solar: "FOTOVOLTAICA"     # modalidade 'Pequenas Usinas (MMGD)' vira 'FOTOVOLTAICA - MMGD'
   componentes_termica_flexivel:
     - val_verifordemdemeritoacimadainflex
     - val_verifunitcommitment
@@ -74,6 +93,79 @@ graficos:
   dias_recentes: 4            # gráficos diários dos N últimos dias disponíveis
   cl_xlim: [10000, 50000]     # eixo carga líquida (MW) nos scatters
   cmo_ylim: [0, 2000]         # eixo CMO (R$/MWh) nos scatters
+
+# Temperatura horária "Brasil" = média ponderada pela carga de estações WMO (aeroportos das capitais),
+# via bulk do Meteostat (https://bulk.meteostat.net/v2/hourly/{id}.csv.gz, UTC; derivado de NOAA ISD/SYNOP).
+# Só é usada pelo sampler de carga v6 (forma do perfil horário). Pesos ~ participação na carga do SIN.
+temperatura:
+  fonte_url: "https://bulk.meteostat.net/v2/hourly/{id}.csv.gz"
+  dir: "raw/temperatura"
+  arquivo_processado: "processed/temperatura_brasil.parquet"
+  fuso_horas: -3                 # UTC -> horário de Brasília (sem horário de verão desde 2019)
+  max_lacuna_interp_h: 6         # lacunas maiores ficam NaN na estação (cai fora da média ponderada)
+  estacoes:
+    - {id: "83780", nome: "São Paulo (Congonhas)", peso: 0.30}
+    - {id: "83721", nome: "Campinas", peso: 0.05}
+    - {id: "83755", nome: "Rio de Janeiro (Santos Dumont)", peso: 0.09}
+    - {id: "83587", nome: "Belo Horizonte", peso: 0.08}
+    - {id: "83649", nome: "Vitória", peso: 0.02}
+    - {id: "83378", nome: "Brasília", peso: 0.04}
+    - {id: "83424", nome: "Goiânia", peso: 0.03}
+    - {id: "83840", nome: "Curitiba", peso: 0.06}
+    - {id: "83899", nome: "Florianópolis", peso: 0.04}
+    - {id: "83971", nome: "Porto Alegre", peso: 0.07}
+    - {id: "83248", nome: "Salvador", peso: 0.06}
+    - {id: "82899", nome: "Recife", peso: 0.05}
+    - {id: "82398", nome: "Fortaleza", peso: 0.04}
+    - {id: "82193", nome: "Belém", peso: 0.03}
+    - {id: "82332", nome: "Manaus", peso: 0.04}
+
+# ============================================================================================
+# MODELO (simulador Monte Carlo horário, herdado do mini_dessem)
+# ============================================================================================
+modelo:
+  projecoes: "config/projecoes.yaml"      # premissas mensais para anos sem dado observado
+  params_dir: "modelo/params"             # relativo a paths.output_dir: parâmetros treinados dos samplers
+  treino:
+    inicio: "2022-01-01"                  # janela de treino dos samplers (fim = último dado observado)
+    carga_min_obs_regressao: 30           # mínimo de horas por (tipo_dia, mês, hora) para a regressão v6
+  # Limites operacionais (MW)
+  limite_hidro_reservatorio: 42000
+  min_hidro_reservatorio: 14500
+  # Térmica "inflexível" da simulação (o que o modelo NÃO decide):
+  #   termica_total   -> geração térmica total observada/projetada (premissa do legado: val_inflexterm = val_gertermica)
+  #   termica_forcada -> térmica total - térmica flexível observada (só o que é de fato forçado)
+  inflexterm: termica_forcada
+  # A carga do balanço não inclui a exportação (val_intercambio da linha SIN), mas a geração observada sim;
+  # somar fecha a identidade geração = carga + exportação (~0,2-1 GW) e alinha a carga líquida simulada à observada.
+  carga_inclui_intercambio: true
+  inflexterm_adicional_mw: 3500           # adicionado só em PROJEÇÕES nos meses abaixo (legado: VALOR_FIXO_INFLEXTERM)
+  inflexterm_adicional_meses: [11, 12, 1, 2, 3]
+  # Regressão hidro fio d'água: FD = intercept + ghr*R + ena*ENA + peso_mes[m] + peso_hora[h] + peso_dia
+  # Valores do legado (calibrados no carga_liquida antigo: MAE 1.857 MW, R² 0,889). `python run.py treinar hidro_fd`
+  # recalibra por OLS nos dados observados e grava em params_dir/hidro_fd.json (tem precedência se existir).
+  hidro_fd:
+    intercept: 3563
+    ghr: 0.33
+    ena: 0.15
+    peso_mes: {1: 1944, 2: 2737, 3: 4870, 4: 6687, 5: 5241, 6: 2677, 7: 1062, 8: -467, 9: -1353, 10: -2544, 11: -1036, 12: 0}
+    peso_hora: {0: 937, 1: 447, 2: 69, 3: -148, 4: -216, 5: -154, 6: -257, 7: -552, 8: -753, 9: -809, 10: -818, 11: -797,
+                12: -876, 13: -428, 14: 105, 15: 732, 16: 1489, 17: 2520, 18: 3564, 19: 3602, 20: 3125, 21: 2621, 22: 2215, 23: 1708}
+    peso_weekday: 1352
+    peso_fds: 1523
+  # Solar: expoente de forma aplicado ao perfil proporcional (acentua pico, suaviza rampas)
+  solar_centralizada_shape: 1.5
+  solar_distribuida_shape: 1.0
+  solar_share_centralizada_default: 0.36  # meses sem dado de MMGD (2022): fração centralizada do total
+  # Preço
+  pld_minimo: 61
+  pilha_termica: null                     # xlsx com aba 'pilha_term' (potencia acumulada MW, cvu R$/MWh); null = pilha de exemplo
+  # Simulação
+  num_simulacoes: 6                       # cenários (meses completos) por mês/ano
+  anos: [2022, 2023, 2024, 2025, 2026, 2027, 2028]
+  meses: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  balance_tolerance: 0.001
+  solver_xtol: 0.000001
 
 logging:
   level: INFO
