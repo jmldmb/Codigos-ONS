@@ -1,0 +1,80 @@
+# Configuração do projeto Carga Líquida
+# Os caminhos de dados apontam para o checkout principal para sobreviverem a worktrees.
+# CARGA_LIQUIDA_DATA_DIR / CARGA_LIQUIDA_OUTPUT_DIR (variáveis de ambiente) sobrescrevem paths.*.
+paths:
+  data_dir: "C:/Users/joaom/Codigos/Codigos-ONS/carga_liquida/Data"
+  output_dir: "Output"          # relativo à raiz do projeto (carga_liquida/)
+  # Dados já baixados pelo módulo baterias/ (reaproveitados, não re-baixados)
+  coff_eolica_dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_eolica"
+  coff_fotovoltaica_dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_fotovoltaica"
+
+# Fontes ONS (open data S3). {y}=ano, {m}=mês com 2 dígitos. `dir` é relativo a paths.data_dir
+# (os nomes preservam o layout Data/raw/... já existente no disco).
+ons_base: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/"
+datasets:
+  geracao_usina:        # geração horária verificada por usina (todos os tipos, inclui MMGD)
+    path: "geracao_usina_2_ho/GERACAO_USINA-2_{y}_{m}.parquet"
+    dir: "raw/geracao por usina"
+    freq: monthly
+    start: "2022-01"
+  termica_despacho:     # geração térmica horária decomposta por motivo de despacho (programado/verificado)
+    path: "geracao_termica_despacho_2_ho/GERACAO_TERMICA_DESPACHO-2_{y}_{m}.parquet"
+    dir: "raw/termoeletrica"
+    freq: monthly
+    start: "2022-01"
+  cmo:                  # custo marginal de operação semi-horário por subsistema
+    path: "cmo_tm/CMO_SEMIHORARIO_{y}.parquet"
+    dir: "raw/CMO"
+    freq: yearly
+    start: "2022"
+
+download:
+  verify_ssl: false
+  timeout: 300
+  overwrite_last_n_months: 1   # re-baixa o(s) mês(es) mais recente(s) (arquivos ainda em atualização)
+
+# Cadastro manual de UHEs: nom_usina -> Classificação ('R' reservatório | 'FD' fio d'água)
+cadastro:
+  arquivo: "raw/cadastros/cadastro.xlsx"
+  # Renomeações feitas pelo ONS no dataset depois do cadastro (nome novo no dado -> nome no cadastro).
+  # Sem isso, a usina sai silenciosamente de FD/R a partir da data da troca.
+  aliases:
+    "Corumbá": "Corumbá I"            # desde 2024-11 (R)
+    "UHE Sobradinho": "Sobradinho"    # desde 2025-10 (R)
+
+# Janela de análise (fim null = hoje)
+periodo:
+  inicio: "2022-01-01"
+  fim: null
+
+# Definição de carga líquida observada
+#   carga_liquida = Hidro_R + termica_flexivel
+#   termica_flexivel = soma das componentes abaixo (geração verificada)
+carga_liquida:
+  tipo_usina_hidro: "HIDROELÉTRICA"
+  componentes_termica_flexivel:
+    - val_verifordemdemeritoacimadainflex
+    - val_verifunitcommitment
+  # todas as componentes verificadas (para o gráfico empilhado de despacho térmico)
+  componentes_termica_todas:
+    - val_verifordemdemeritoacimadainflex
+    - val_verifinflexibilidade
+    - val_verifrazaoeletrica
+    - val_verifgarantiaenergetica
+    - val_verifgfom
+    - val_verifreposicaoperdas
+    - val_verifexportacao
+    - val_verifreservapotencia
+    - val_verifgsub
+    - val_verifunitcommitment
+  cmo_subsistema: "SUDESTE"
+
+graficos:
+  dpi: 300
+  dias_recentes: 4            # gráficos diários dos N últimos dias disponíveis
+  cl_xlim: [10000, 50000]     # eixo carga líquida (MW) nos scatters
+  cmo_ylim: [0, 2000]         # eixo CMO (R$/MWh) nos scatters
+
+logging:
+  level: INFO
+  file: "logs/carga_liquida.log"

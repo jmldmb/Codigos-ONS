@@ -8,7 +8,7 @@ Este repositório contém um conjunto integrado de ferramentas e análises para 
 
 - **Captura ENA**: Coleta e análise de Energia Natural Afluente
 - **Análise de Carga**: Processamento e visualização de dados de carga do sistema
-- **Carga Líquida**: Análises de carga líquida considerando geração distribuída
+- **Carga Líquida**: Carga líquida observada do SIN (Hidro R + térmica flexível) × CMO/curtailment; absorve o Mini DESSEM na etapa 2
 - **Curtailment**: Análises de cortes de geração renovável
 - **CVU Térmicas**: Cálculo e análise de Custo Variável Unitário de usinas térmicas
 - **Mini DESSEM**: Análises baseadas no modelo de despacho DESSEM
@@ -70,9 +70,10 @@ Codigos-ONS/
 │   ├── config.yaml
 │   └── Data/                 # Dados (não versionado)
 │
-├── carga_liquida/            # Carga líquida
-│   ├── Scripts/
-│   └── Data/                 # Dados (não versionado)
+├── carga_liquida/            # Carga líquida (pacote: run.py, config/, src/carga_liquida/, legacy/)
+│   ├── src/carga_liquida/    # dados/ (ONS) · observado/ (cálculo + análises) · modelo/ e validacao/ (etapa 2)
+│   ├── Data/                 # Dados (não versionado)
+│   └── README.md
 │
 ├── Curtailment/              # Análises de curtailment
 │   ├── Scripts/
