@@ -67,9 +67,6 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         ano, mes = int(r.ano), int(r.mes)
         temp_mes = _temperatura_mensal(ano, mes, clim, temp_mensal)
         n_dias = calendar.monthrange(ano, mes)[1]
-        if modo_va:
-            p = pilha_termica.pilha(ano, mes)
-            pilha_pot, pilha_cvu = p["potencia"].values.astype(float), p["cvu"].values.astype(float)
         for sim in range(1, n_sim + 1):
             for dia in range(1, n_dias + 1):
                 d = date(ano, mes, dia)
@@ -79,9 +76,12 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 eol = s_eol.gerar_dia(mes, r.eolica, rng)
                 cent, dist = s_cent.gerar_dia(mes, r.solar_centralizada), s_dist.gerar_dia(mes, r.solar_distribuida)
                 if modo_va:
-                    va = float(va_dia.get(pd.Timestamp(d), np.nan))
-                    if np.isnan(va):
+                    va = va_dia.loc[pd.Timestamp(d)].to_dict() if pd.Timestamp(d) in va_dia.index else {}
+                    if not va or np.isnan(va.get("SE", np.nan)):
                         continue
+                    p = pilha_termica.pilha_semana(d)
+                    pilha_arr = {"cvu": p["cvu"].values.astype(float), "capacidade": p["capacidade"].values.astype(float),
+                                 "subsistema": p["subsistema"].values}
                 else:
                     base = s_term.gerar_dia(mes, tipo, float(r.termica_flex_base))
                 if np.isnan(carga).any() or np.isnan(eol).any():
@@ -89,7 +89,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 for h in range(24):
                     if modo_va:
                         res = despachar_va(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
-                                           mes, h, tipo == "DU", va, pilha_pot, pilha_cvu, pfd)
+                                           mes, h, tipo == "DU", va, pilha_arr, pfd)
                     else:
                         res = despachar(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
                                         mes, h, tipo == "DU", pfd, termica_base=base[h])
@@ -103,7 +103,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                         "val_gersolar_cent": cent[h], "val_gersolar_dist": dist[h], "val_gersolar": cent[h] + dist[h],
                         "val_inflexterm": r.inflexterm, "ENA_arm": r.ena_armazenavel, "temp_c": temp_h[h] if temp_h else np.nan,
                         **res, "val_gerhidro_total": res["val_gerhidro_reservatorio"] + res["val_gerhidro_fd"],
-                        "carga_liquida": cl_, "valor_agua": va if modo_va else np.nan,
+                        "carga_liquida": cl_, "valor_agua": va.get("SE") if modo_va else np.nan,
                     })
                     if "pld" not in res:
                         registros[-1]["pld"] = precos.pld(res["val_term_despacho"], ano, mes)

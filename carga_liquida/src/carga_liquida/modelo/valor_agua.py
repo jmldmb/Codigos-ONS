@@ -1,14 +1,14 @@
-"""Valor da água (preço-base, R$/MWh) — a premissa do modo `termica_flexivel: valor_agua`.
+"""Valor da água (preço-base semanal por subsistema, R$/MWh) — premissa do modo `termica_flexivel: valor_agua`.
 
-Faz o papel do preço de patamar do DECOMP: define quais térmicas entram na base (CVU <= VA) e é o
-preço das horas em que a hidro de reservatório é o recurso marginal. A modulação horária fica por
-conta do despacho (modelo/despacho.despachar_va).
+Faz o papel do preço de patamar do DECOMP: define quais térmicas entram na base comprometida da semana
+(CVU <= VA do subsistema da usina) e é o preço das horas em que a hidro de reservatório é o recurso
+marginal. A modulação horária fica por conta do despacho (modelo/despacho.despachar_va).
 
 Histórico (config.modelo.valor_agua_fonte):
-    cmo    mediana semanal do CMO observado (semana operativa sábado-sexta)   — preço observado
-    pilha  CVU da pilha do mês no ponto da térmica flexível média da semana — dual da térmica observada
-Projeção: `valor_agua_rs_mwh[ano][mês]` em config/projecoes.yaml; se ausente mas houver
-`termica_flexivel_mwmed`, VA = CVU da pilha nesse ponto (as duas premissas são duais via a pilha).
+    cmo    mediana semanal do CMO observado, por subsistema (semana operativa sábado-sexta)
+    pilha  CVU da pilha da semana no ponto da térmica de mérito média observada (um valor, aplicado a todos)
+Projeção: `valor_agua_rs_mwh[ano][mês]` em config/projecoes.yaml — número (todos os subsistemas) ou
+{SE: .., S: .., NE: .., N: ..}. Se ausente mas houver `termica_flexivel_mwmed`, VA = CVU da pilha nesse ponto.
 """
 import numpy as np
 import pandas as pd
@@ -20,15 +20,11 @@ from ..observado import carga_liquida as cl
 from . import pilha_termica
 
 logger = get_logger("valor_agua")
+SUBSISTEMAS = ("SE", "S", "NE", "N")
 
 
-def _semana(ts: pd.Series) -> pd.Series:
-    """Sábado que inicia a semana operativa de cada instante."""
-    return (ts - pd.to_timedelta((ts.dt.weekday + 2) % 7, unit="D")).dt.normalize()
-
-
-def cvu_no_ponto(ano: int, mes: int, mw: float) -> float:
-    p = pilha_termica.pilha(ano, mes)
+def cvu_no_ponto(data, mw: float) -> float:
+    p = pilha_termica.pilha_semana(data)
     if mw <= 0:
         return float(load_config()["modelo"]["pld_minimo"])
     i = np.searchsorted(p["potencia"].values, mw, side="left")
@@ -36,51 +32,57 @@ def cvu_no_ponto(ano: int, mes: int, mw: float) -> float:
 
 
 def historico_semanal(fonte: str | None = None) -> pd.DataFrame:
-    """(semana, valor_agua) para o período observado."""
+    """index = semana operativa; colunas SE, S, NE, N."""
     fonte = fonte or load_config()["modelo"]["valor_agua_fonte"]
     if fonte == "cmo":
-        cmo = ons.carregar_cmo()
-        cmo["semana"] = _semana(cmo["din_instante"])
-        va = cmo.groupby("semana")["val_cmo"].median().rename("valor_agua")
-    elif fonte == "pilha":
-        h = cl.carregar_historico()
-        h["semana"] = _semana(h["din_instante"])
-        w = h.groupby("semana").agg(flex=("termica_flexivel", "mean"), ano=("ano", "first"), mes=("mes", "first"))
-        va = pd.Series([cvu_no_ponto(int(a), int(m), f) for f, a, m in zip(w["flex"], w["ano"], w["mes"])],
-                       index=w.index, name="valor_agua")
-    else:
-        raise ValueError(f"valor_agua_fonte inválida: {fonte}")
-    return va.reset_index()
+        cmo = ons.carregar_cmo(subsistema=None)
+        cmo["semana"] = pilha_termica.semana_operativa(cmo["din_instante"])
+        va = cmo.groupby(["semana", "id_subsistema"])["val_cmo"].median().unstack()
+        return va.reindex(columns=SUBSISTEMAS)
+    if fonte == "pilha":
+        t = cl.carregar_termica_componentes()[["din_instante", "val_verifordemdemeritoacimadainflex"]]
+        t["semana"] = pilha_termica.semana_operativa(t["din_instante"])
+        w = t.groupby("semana")["val_verifordemdemeritoacimadainflex"].mean()
+        vals = [cvu_no_ponto(s, m) for s, m in w.items()]
+        return pd.DataFrame({sub: vals for sub in SUBSISTEMAS}, index=w.index)
+    raise ValueError(f"valor_agua_fonte inválida: {fonte}")
 
 
-def projecoes_mensais() -> dict[tuple[int, int], float]:
+def projecoes_mensais() -> dict[tuple[int, int], dict[str, float]]:
     path = ROOT / load_config()["modelo"]["projecoes"]
     with open(path, encoding="utf-8") as f:
         proj = yaml.safe_load(f)
     out = {}
     for ano, meses in (proj.get("valor_agua_rs_mwh") or {}).items():
         for mes, v in meses.items():
-            out[(int(ano), int(mes))] = float(v)
-    # dual: térmica base declarada -> VA pela pilha
-    for ano, meses in (proj.get("termica_flexivel_mwmed") or {}).items():
+            out[(int(ano), int(mes))] = ({s: float(v) for s in SUBSISTEMAS} if not isinstance(v, dict)
+                                         else {s: float(v.get(s, v.get("SE"))) for s in SUBSISTEMAS})
+    for ano, meses in (proj.get("termica_flexivel_mwmed") or {}).items():  # dual: térmica base -> VA pela pilha
         for mes, mw in meses.items():
-            out.setdefault((int(ano), int(mes)), cvu_no_ponto(int(ano), int(mes), float(mw)))
+            k = (int(ano), int(mes))
+            if k not in out:
+                v = cvu_no_ponto(pd.Timestamp(k[0], k[1], 15), float(mw))
+                out[k] = {s: v for s in SUBSISTEMAS}
     return out
 
 
-def serie_diaria(anos, meses) -> pd.Series:
-    """valor_agua por dia (index = data) para os anos/meses pedidos: histórico semanal onde existe, projeção mensal no resto."""
-    hist = historico_semanal().set_index("semana")["valor_agua"]
+def serie_diaria(anos, meses) -> pd.DataFrame:
+    """VA por dia (index = data) e subsistema: histórico semanal onde existe, projeção mensal no resto."""
+    hist = historico_semanal()
     proj = projecoes_mensais()
-    dias = pd.DatetimeIndex([d for a in anos for m in meses for d in pd.date_range(f"{a}-{m:02d}-01", periods=31, freq="D") if d.month == m])
-    sem = _semana(pd.Series(dias))
-    va = pd.Series(hist.reindex(sem.values).values, index=dias, name="valor_agua")
-    faltam = va.isna()
+    dias = pd.DatetimeIndex([d for a in anos for m in meses
+                             for d in pd.date_range(f"{a}-{m:02d}-01", periods=31, freq="D") if d.month == m])
+    sem = pilha_termica.semana_operativa(pd.Series(dias)).values
+    va = hist.reindex(sem)
+    va.index = dias
+    faltam = va["SE"].isna()
     for d in dias[faltam]:
-        va[d] = proj.get((d.year, d.month), np.nan)
-    sem_valor = sorted({(d.year, d.month) for d in dias[va.isna()]})
+        p = proj.get((d.year, d.month))
+        if p:
+            va.loc[d] = [p[s] for s in SUBSISTEMAS]
+    sem_valor = sorted({(d.year, d.month) for d in dias[va["SE"].isna()]})
     if sem_valor:
         logger.warning(f"Sem valor da água (histórico nem projeção) para {sem_valor}; esses meses serão pulados")
     logger.info(f"valor da água: {int((~faltam).sum())} dias do histórico ({load_config()['modelo']['valor_agua_fonte']}), "
-                f"{int(faltam.sum())} dias de projeção; média {va.mean():.0f} R$/MWh")
+                f"{int(faltam.sum())} dias de projeção; média SE {va['SE'].mean():.0f} R$/MWh")
     return va

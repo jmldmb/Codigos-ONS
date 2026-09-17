@@ -45,7 +45,8 @@ termica_total_mwmed:
 
 # Térmica flexível 'base' (MW médios) = premissa de despacho por fins energéticos (config.modelo.termica_flexivel: exogena).
 # PLACEHOLDER: valores observados de 2025 repetidos em 2026-28 — substitua pelo seu cenário.
-# No modo valor_agua, o preço-base pode ser dado diretamente em `valor_agua_rs_mwh: {2026: {1: ..., ...}}` (R$/MWh);
+# No modo valor_agua, o preço-base pode ser dado diretamente em `valor_agua_rs_mwh: {2026: {1: 250, ...}}` (R$/MWh,
+# um número para todos os subsistemas) ou por subsistema `{1: {SE: 250, S: 250, NE: 30, N: 30}, ...}`;
 # se ausente, é derivado desta térmica pela pilha do mês (as duas premissas são duais).
 termica_flexivel_mwmed:
   2026: {1: 418, 2: 161, 3: 599, 4: 864, 5: 1240, 6: 1645, 7: 2266, 8: 3091, 9: 3114, 10: 4397, 11: 3975, 12: 3025}
