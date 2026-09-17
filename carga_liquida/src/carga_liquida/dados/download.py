@@ -33,8 +33,7 @@ class OnsDownloader:
         self.refresh_months = cfg["download"].get("overwrite_last_n_months", 1)
 
     def plan(self, name: str, today: date | None = None) -> list[tuple[str, Path, bool]]:
-        """Lista (url, destino, deve_sobrescrever) para um dataset. Com `path_fallback` no config, a url é uma
-        lista [principal, alternativa] e o destino é decidido pelo que responder."""
+        """Lista (url, destino, deve_sobrescrever) para um dataset."""
         today = today or date.today()
         spec = self.datasets[name]
         dest_dir = dataset_dir(name)
@@ -44,11 +43,7 @@ class OnsDownloader:
             recent = set(months[-self.refresh_months:]) if self.refresh_months else set()
             for y, m in months:
                 rel = spec["path"].format(y=y, m=f"{m:02d}")
-                if spec.get("path_fallback"):
-                    alt = spec["path_fallback"].format(y=y, m=f"{m:02d}")
-                    items.append(([self.base + rel, self.base + alt], [dest_dir / Path(rel).name, dest_dir / Path(alt).name], (y, m) in recent))
-                else:
-                    items.append((self.base + rel, dest_dir / Path(rel).name, (y, m) in recent))
+                items.append((self.base + rel, dest_dir / Path(rel).name, (y, m) in recent))
         elif spec["freq"] == "yearly":
             for y in range(int(spec["start"]), today.year + 1):
                 rel = spec["path"].format(y=y)
@@ -65,7 +60,7 @@ class OnsDownloader:
             logger.error(f"Erro ao baixar {url}: {e}")
             return False
         if r.status_code != 200:
-            logger.info(f"Indisponível ({r.status_code}): {url}")
+            logger.warning(f"Indisponível ({r.status_code}): {url}")
             return False
         tmp = dest.with_suffix(dest.suffix + ".part")
         tmp.write_bytes(r.content)
@@ -79,11 +74,10 @@ class OnsDownloader:
         for name in names:
             ok = skip = fail = 0
             for url, dest, refresh in self.plan(name):
-                urls, dests = (url, dest) if isinstance(url, list) else ([url], [dest])
-                if any(d.exists() for d in dests) and not (force or refresh):
+                if dest.exists() and not (force or refresh):
                     skip += 1
                     continue
-                if any(self.fetch(u, d) for u, d in zip(urls, dests)):
+                if self.fetch(url, dest):
                     ok += 1
                 else:
                     fail += 1
