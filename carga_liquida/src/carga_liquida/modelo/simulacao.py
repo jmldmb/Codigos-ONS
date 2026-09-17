@@ -72,7 +72,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         temp_mes = _temperatura_mensal(ano, mes, clim, temp_mensal)
         n_dias = calendar.monthrange(ano, mes)[1]
         for sim in range(1, n_sim + 1):
-            eol_mes = s_eol.gerar_mes(mes, r.eolica, n_dias, rng)
+            eol_mes = s_eol.gerar_mes(mes, r.eolica, n_dias, rng, teto=float(r.eolica_capacidade))
             cent_mes, dist_mes = s_cent.gerar_mes(mes, r.solar_centralizada, n_dias, rng), s_dist.gerar_mes(mes, r.solar_distribuida, n_dias, rng)
             for dia in range(1, n_dias + 1):
                 d = date(ano, mes, dia)

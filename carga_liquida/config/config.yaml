@@ -50,6 +50,10 @@ datasets:
     dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_fotovoltaica"
     freq: monthly
     start: "2024-04"
+  capacidade:           # cadastro de unidades geradoras com potência efetiva e datas de entrada/desativação (arquivo único)
+    path: "capacidade-geracao/CAPACIDADE_GERACAO.parquet"
+    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/capacidade"
+    freq: static
 
 download:
   verify_ssl: false
@@ -178,6 +182,9 @@ modelo:
   # Eólica: std de D 0,13 (set) a 0,40 (fev), ρ 0,4–0,8 — sem ele todo dia simulado tem a média do mês e não existem
   # dias de vento forte (onde o corte energético acontece) nem fraco (térmica extra, picos de preço).
   eolica_fator_diario: true
+  # Teto físico da eólica horária = capacidade instalada (cadastro ONS no histórico; eolica_capacidade_mw em projecoes.yaml).
+  # Só corta a cauda (0,01 % das horas): o máximo agregado observado fica em ~0,87 da instalada por diversidade espacial.
+  eolica_teto_capacidade: true
   solar_fator_diario: false               # std de D 0,06–0,16 (cent.), 0,06–0,09 (dist.): segunda ordem; ligar só com o eólico
   solar_centralizada_shape: 1.5
   solar_distribuida_shape: 1.0

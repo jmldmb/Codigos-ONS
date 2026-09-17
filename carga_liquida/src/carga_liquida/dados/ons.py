@@ -214,6 +214,22 @@ def carregar_coff_horario(fonte: str, inicio: str | None = None, fim: str | None
     return df.groupby("din_instante", as_index=False)[["geracao_mw", "corte_mw", "corte_ene_mw", "corte_rede_mw", "potencial_mw"]].mean()
 
 
+def carregar_capacidade_mensal(tipo: str = "EOLIELÉTRICA") -> pd.Series:
+    """Capacidade instalada (MW, soma da potência efetiva das unidades em operação no fim do mês) por mês, para o tipo de
+    usina cujo nome contém `tipo` (nom_tipousina: EOLIELÉTRICA, FOTOVOLTAICA, TÉRMICA...; dataset `capacidade`). Índice: Period mensal."""
+    p = dataset_dir("capacidade") / "CAPACIDADE_GERACAO.parquet"
+    if not p.exists():
+        raise FileNotFoundError(f"{p} não existe. Rode: python run.py baixar capacidade")
+    d = pd.read_parquet(p, columns=["nom_tipousina", "dat_entradaoperacao", "dat_entradateste", "dat_desativacao", "val_potenciaefetiva"])
+    d = d[d["nom_tipousina"].astype(str).str.upper().str.contains(tipo.upper())].copy()
+    d["ini"] = pd.to_datetime(d["dat_entradaoperacao"].fillna(d["dat_entradateste"]))
+    d["fim"] = pd.to_datetime(d["dat_desativacao"])
+    ini, end = periodo()
+    meses = pd.period_range(pd.Timestamp(ini), pd.Timestamp(end), freq="M")
+    return pd.Series({m: float(d[(d["ini"] <= m.end_time) & (d["fim"].isna() | (d["fim"] > m.end_time))]["val_potenciaefetiva"].sum())
+                      for m in meses}, name="capacidade_mw")
+
+
 def carregar_curtailment(inicio: str | None = None, fim: str | None = None) -> pd.DataFrame:
     """Curtailment eólico + solar horário do SIN (MW médios): curtailment_{eolica|solar}_mw (total) e as parcelas
     curtailment_{eolica|solar}_{ene|rede}_mw; totais curtailment_mw, curtailment_ene_mw, curtailment_rede_mw."""

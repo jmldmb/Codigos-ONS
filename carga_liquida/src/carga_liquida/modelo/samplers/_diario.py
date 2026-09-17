@@ -59,9 +59,10 @@ def estimar(df: pd.DataFrame, col: str, perfis: dict) -> dict:
 
 
 def gerar_mes(perfil_prop: np.ndarray, p: dict, mw_medios: float, n_dias: int, rng: np.random.Generator,
-              fator_diario: bool = True, ruido: bool = True, aditivo: bool = True) -> np.ndarray:
+              fator_diario: bool = True, ruido: bool = True, aditivo: bool = True, teto: float | None = None) -> np.ndarray:
     """Matriz (n_dias, 24) em MW com média do mês = mw_medios. `aditivo=False` (solar): Y = M · p_h · D — nebulosidade
-    escala o dia inteiro, e um deslocamento aditivo criaria geração à noite."""
+    escala o dia inteiro, e um deslocamento aditivo criaria geração à noite. `teto` (MW): limite físico horário
+    (capacidade instalada); o corte é redistribuído pela renormalização do mês."""
     perfil = np.asarray(perfil_prop) * 24                                       # média 1
     nivel = np.zeros((n_dias, 24))
     if fator_diario and p.get("quantis_d"):
@@ -86,4 +87,11 @@ def gerar_mes(perfil_prop: np.ndarray, p: dict, mw_medios: float, n_dias: int, r
     # sem degrau à meia-noite que a média por dia-calendário criaria)
     Z = (Z - np.convolve(np.pad(Z, 12, mode="reflect"), np.ones(24) / 24, mode="valid")[:len(Z)]).reshape(n_dias, 24)
     y = np.maximum(mw_medios * ((perfil[None, :] + nivel + Z) if aditivo else perfil[None, :] * (1 + nivel) * (1 + Z)), 0.0)
-    return y * (mw_medios / y.mean()) if y.mean() > 0 else np.tile(perfil * mw_medios, (n_dias, 1))
+    if y.mean() <= 0:
+        return np.tile(perfil * mw_medios, (n_dias, 1))
+    y *= mw_medios / y.mean()
+    if teto is not None and np.isfinite(teto) and teto > 0 and y.max() > teto:
+        for _ in range(3):                                   # cortar no teto e recompor a média do mês (converge em 2-3 passos)
+            y = np.minimum(y, teto)
+            y *= min(mw_medios / y.mean(), teto / max(y.max(), 1e-9))
+    return y

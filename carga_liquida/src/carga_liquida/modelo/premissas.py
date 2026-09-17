@@ -2,7 +2,7 @@
 
 Colunas (MW médios; ENA em MWmed):
     carga, eolica, solar_centralizada, solar_distribuida, ena_armazenavel, termica_total,
-    termica_flexivel, curtailment_rede_eolica, curtailment_rede_solar, inflexterm, historico (bool)
+    termica_flexivel, curtailment_rede_eolica, curtailment_rede_solar, eolica_capacidade, inflexterm, historico (bool)
 
 eolica e solar_centralizada são POTENCIAL (geração + corte); curtailment_rede_* é o corte de rede (CNF/REL) que
 se subtrai antes do despacho (o energético o despacho decide). Antes do COFF (2023-10) a eólica é a geração
@@ -25,7 +25,7 @@ from ..observado import carga_liquida as cl
 logger = get_logger("premissas")
 
 COLS = ["carga", "eolica", "solar_centralizada", "solar_distribuida", "ena_armazenavel", "termica_total", "termica_flexivel",
-        "curtailment_rede_eolica", "curtailment_rede_solar"]
+        "curtailment_rede_eolica", "curtailment_rede_solar", "eolica_capacidade"]
 
 
 def _mensal(df: pd.DataFrame, col_tempo: str, cols: dict) -> pd.DataFrame:
@@ -81,6 +81,14 @@ def historico() -> pd.DataFrame:
     hist = cl.carregar_historico()
     out = out.join(_mensal(hist, "din_instante", {"termica_flexivel": "termica_flexivel"}))
 
+    try:                                                   # teto físico da eólica horária (cadastro ONS)
+        cap = ons.carregar_capacidade_mensal("EOLIELÉTRICA")
+        out = out.join(pd.Series(cap.values, index=pd.MultiIndex.from_arrays([cap.index.year, cap.index.month], names=["ano", "mes"]),
+                                 name="eolica_capacidade"))
+    except FileNotFoundError as e:
+        logger.warning(str(e))
+        out["eolica_capacidade"] = float("nan")
+
     out[["curtailment_rede_eolica", "curtailment_rede_solar"]] = out[["curtailment_rede_eolica", "curtailment_rede_solar"]].fillna(0.0)
     out = out.reset_index()
     out = out[[_mes_completo(a, m, ultimo) for a, m in zip(out["ano"], out["mes"])]]
@@ -96,14 +104,15 @@ def projecoes() -> pd.DataFrame:
     chave = {"carga_mwmed": "carga", "eolica_mwmed": "eolica", "solar_centralizada_mwmed": "solar_centralizada",
              "solar_distribuida_mwmed": "solar_distribuida", "ena_armazenavel_mwmed": "ena_armazenavel",
              "termica_total_mwmed": "termica_total", "termica_flexivel_mwmed": "termica_flexivel",
-             "curtailment_rede_eolica_mwmed": "curtailment_rede_eolica", "curtailment_rede_solar_mwmed": "curtailment_rede_solar"}
+             "curtailment_rede_eolica_mwmed": "curtailment_rede_eolica", "curtailment_rede_solar_mwmed": "curtailment_rede_solar",
+             "eolica_capacidade_mw": "eolica_capacidade"}
     rows = {}
     for k, col in chave.items():
         for ano, meses in (proj.get(k) or {}).items():
             for mes, v in meses.items():
                 rows.setdefault((int(ano), int(mes)), {})[col] = float(v)
     df = pd.DataFrame([{"ano": a, "mes": m, **v} for (a, m), v in sorted(rows.items())])
-    for c in ("termica_flexivel", "curtailment_rede_eolica", "curtailment_rede_solar"):
+    for c in ("termica_flexivel", "curtailment_rede_eolica", "curtailment_rede_solar", "eolica_capacidade"):
         if c not in df.columns:
             df[c] = float("nan")
     df["historico"] = False
@@ -139,6 +148,10 @@ def montar(anos=None, meses=None) -> pd.DataFrame:
             logger.warning(f"Projeções sem {c}_mwmed em projecoes.yaml (corte de rede = 0): "
                            f"{[(int(a), int(m)) for a, m in zip(df.loc[sem, 'ano'], df.loc[sem, 'mes'])]}")
         df[c] = df[c].fillna(0.0) if cfg.get("curtailment_rede", True) else 0.0
+    if not cfg.get("eolica_teto_capacidade", True):
+        df["eolica_capacidade"] = float("nan")             # NaN = sem teto
+    elif (~df["historico"] & df["eolica_capacidade"].isna()).any():
+        logger.warning("Projeções sem eolica_capacidade_mw em projecoes.yaml: eólica horária sem teto nesses meses")
     if anos is not None:
         df = df[df["ano"].isin(list(anos))]
     if meses is not None:
