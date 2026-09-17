@@ -15,15 +15,22 @@ from ..config import data_dir, dataset_dir, get_logger, load_config, periodo
 
 logger = get_logger("dados")
 
-_RE_ANO_MES = re.compile(r"_(\d{4})_(\d{2})\.parquet$")
-_RE_ANO = re.compile(r"_(\d{4})\.parquet$")
+_RE_ANO_MES = re.compile(r"_(\d{4})_(\d{2})\.(parquet|csv)$")
+_RE_ANO = re.compile(r"_(\d{4})\.(parquet|csv)$")
+
+
+def _ler(p: Path, columns: list[str] | None = None) -> pd.DataFrame:
+    """Lê parquet ou csv (ONS: separador ';') com as colunas pedidas."""
+    if p.suffix == ".parquet":
+        return pd.read_parquet(p, columns=columns)
+    return pd.read_csv(p, sep=";", usecols=columns, encoding="utf-8", low_memory=False)
 
 
 def _arquivos(name: str, inicio: str, fim: str) -> list[Path]:
     """Arquivos parquet do dataset cujo ano/mês intersecta [inicio, fim]."""
     ini, end = pd.Timestamp(inicio), pd.Timestamp(fim)
     out = []
-    for p in sorted(dataset_dir(name).glob("*.parquet")):
+    for p in sorted(list(dataset_dir(name).glob("*.parquet")) + list(dataset_dir(name).glob("*.csv"))):
         m = _RE_ANO_MES.search(p.name)
         if m:
             y, mo = int(m.group(1)), int(m.group(2))
@@ -103,6 +110,29 @@ def carregar_cvu(inicio: str | None = None, fim: str | None = None) -> pd.DataFr
     df["cod_usinaplanejamento"] = df["cod_usinaplanejamento"].astype(int)
     df = df[(df["dat_iniciosemana"] >= inicio) & (df["dat_iniciosemana"] <= fim)]
     return df[["dat_iniciosemana", "num_revisao", "cod_usinaplanejamento", "nom_usina", "val_cvu"]].reset_index(drop=True)
+
+
+def carregar_disponibilidade_termica(inicio: str | None = None, fim: str | None = None) -> pd.DataFrame:
+    """Disponibilidade operacional declarada das térmicas (UTE/UTN), média por semana operativa e CEG:
+    (semana, ceg, nom_usina, disp_operacional_mw, potencia_instalada_mw, nuclear)."""
+    ini, end = periodo()
+    inicio, fim = inicio or ini, fim or end
+    partes = []
+    for p in _arquivos("disponibilidade", inicio, fim):
+        df = _ler(p, ["id_tipousina", "nom_usina", "ceg", "din_instante", "val_potenciainstalada", "val_dispoperacional"])
+        df = df[df["id_tipousina"].isin(["UTE", "UTN"])].copy()
+        for c in ("val_potenciainstalada", "val_dispoperacional"):
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        df["din_instante"] = pd.to_datetime(df["din_instante"])
+        df["semana"] = (df["din_instante"] - pd.to_timedelta((df["din_instante"].dt.weekday + 2) % 7, unit="D")).dt.normalize()
+        partes.append(df.groupby(["semana", "ceg"]).agg(nom_usina=("nom_usina", "first"), disp_operacional_mw=("val_dispoperacional", "mean"),
+                                                         potencia_instalada_mw=("val_potenciainstalada", "mean"),
+                                                         nuclear=("id_tipousina", lambda s: bool((s == "UTN").any()))))
+    if not partes:
+        raise FileNotFoundError("Sem arquivos de disponibilidade. Rode: python run.py baixar disponibilidade")
+    df = pd.concat(partes).groupby(level=[0, 1]).agg(nom_usina=("nom_usina", "first"), disp_operacional_mw=("disp_operacional_mw", "mean"),
+                                                      potencia_instalada_mw=("potencia_instalada_mw", "mean"), nuclear=("nuclear", "max"))
+    return df.reset_index()
 
 
 def carregar_cadastro() -> pd.DataFrame:

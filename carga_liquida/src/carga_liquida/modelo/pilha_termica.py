@@ -1,9 +1,12 @@
 """Pilha térmica (merit order) SEMANAL montada dos dados abertos do ONS.
 
     CVU por usina   : dataset `cvu` (semana operativa sábado-sexta, PMO + revisões; usa a revisão mais alta da semana)
-    capacidade      : capacidade flexível = máximo da geração verificada − inflexibilidade média da usina, na janela de
-                      N meses (dataset termica_despacho); a parte inflexível já está no inflexterm. Sem isso a nuclear
-                      (~2 GW, CVU 20-31) ficaria na base da pilha e distorceria o preço (o legado somava 3.500 MW ao despacho)
+    disponibilidade : capacidade flexível da usina na semana = disponibilidade operacional DECLARADA (dataset
+                      disponibilidade_usina_ho, média da semana, casada por CEG) − inflexibilidade média da semana anterior
+                      (dataset termica_despacho). Sem proxy: é a mesma informação que o operador usa no PMO. Nas projeções
+                      vale a última disponibilidade observada (premissa de persistência, editável).
+                      Fallback (config pilha_fonte_capacidade: geracao): máximo gerado nas K semanas anteriores − inflex.
+    nuclear         : inflexível por definição (CEG 'UTN'), fora da pilha
     subsistema      : id_subsistema da usina — a térmica é despachada contra o preço do SEU subsistema
     chave           : cod_usinaplanejamento (presente nos dois datasets)
 
@@ -25,18 +28,42 @@ def semana_operativa(ts: pd.Series) -> pd.Series:
     return (ts - pd.to_timedelta((ts.dt.weekday + 2) % 7, unit="D")).dt.normalize()
 
 
-def _capacidade_mensal() -> pd.DataFrame:
-    """Por (ano, mes, cod): pmax = máximo da geração verificada; inflex = média da inflexibilidade; subsistema."""
+def _geracao_semanal() -> pd.DataFrame:
+    """Por (semana, cod): gmax = máximo da geração verificada; inflex = média da inflexibilidade; subsistema; nuclear."""
     partes = []
     for df in ons.iterar_termica_despacho(["val_verifgeracao", "val_verifinflexibilidade"],
-                                          colunas_extra=["cod_usinaplanejamento", "id_subsistema"]):
+                                          colunas_extra=["cod_usinaplanejamento", "id_subsistema", "ceg"]):
         df = df.dropna(subset=["cod_usinaplanejamento"])
-        g = df.groupby([df["din_instante"].dt.year.rename("ano"), df["din_instante"].dt.month.rename("mes"),
-                        df["cod_usinaplanejamento"].astype(int).rename("cod")]).agg(
-            pmax=("val_verifgeracao", "max"), inflex=("val_verifinflexibilidade", "mean"), subsistema=("id_subsistema", "first"))
+        df["semana"] = semana_operativa(df["din_instante"])
+        g = df.groupby(["semana", df["cod_usinaplanejamento"].astype(int).rename("cod")]).agg(
+            gmax=("val_verifgeracao", "max"), inflex=("val_verifinflexibilidade", "mean"), subsistema=("id_subsistema", "first"),
+            ceg=("ceg", "first"), nuclear=("ceg", lambda s: bool(s.astype(str).str.startswith("UTN").any())))
         partes.append(g)
-    cap = pd.concat(partes).groupby(level=[0, 1, 2]).agg(pmax=("pmax", "max"), inflex=("inflex", "mean"), subsistema=("subsistema", "first"))
-    return cap.reset_index()
+    return pd.concat(partes).groupby(level=[0, 1]).agg(gmax=("gmax", "max"), inflex=("inflex", "mean"), subsistema=("subsistema", "first"),
+                                                        ceg=("ceg", "first"), nuclear=("nuclear", "max")).reset_index()
+
+
+def _disponibilidade_geracao(ger: pd.DataFrame, semana: pd.Timestamp, k: int) -> pd.DataFrame:
+    """Fallback: capacidade flexível = max(gmax) − mean(inflex) nas k semanas anteriores (exclui nuclear)."""
+    jan = ger[(ger["semana"] < semana) & (ger["semana"] >= semana - pd.Timedelta(weeks=k)) & ~ger["nuclear"].astype(bool)]
+    d = jan.groupby("cod").agg(gmax=("gmax", "max"), inflex=("inflex", "mean"), subsistema=("subsistema", "last"))
+    d["capacidade"] = (d["gmax"] - d["inflex"]).clip(lower=0)
+    return d
+
+
+def _disponibilidade_declarada(ger: pd.DataFrame, disp: pd.DataFrame, semana: pd.Timestamp) -> pd.DataFrame:
+    """Capacidade flexível = disponibilidade operacional declarada da semana (ou a última anterior disponível)
+    − inflexibilidade média da semana anterior; casada por CEG; exclui nuclear."""
+    ult = ger[(ger["semana"] < semana) & ~ger["nuclear"].astype(bool)].sort_values("semana").groupby("cod").tail(1).set_index("cod")
+    d_ok = disp[disp["semana"] <= semana]
+    if d_ok.empty or ult.empty:
+        return pd.DataFrame(columns=["capacidade", "subsistema"])
+    # última declaração de cada usina até a semana (usinas ausentes numa semana herdam a anterior)
+    d = d_ok.sort_values("semana").groupby("ceg")["disp_operacional_mw"].last()
+    ult["disp"] = ult["ceg"].map(d)
+    ult = ult.dropna(subset=["disp"])
+    ult["capacidade"] = (ult["disp"] - ult["inflex"]).clip(lower=0)
+    return ult[["capacidade", "subsistema"]]
 
 
 def montar_todas(rebuild: bool = False) -> dict[pd.Timestamp, pd.DataFrame]:
@@ -53,16 +80,16 @@ def montar_todas(rebuild: bool = False) -> dict[pd.Timestamp, pd.DataFrame]:
         return _CACHE
     cfg = load_config()["modelo"]
     cvu = ons.carregar_cvu()
-    cap = _capacidade_mensal()
-    cap["t"] = pd.PeriodIndex.from_fields(year=cap["ano"], month=cap["mes"], freq="M")
-    n = cfg["pilha_capacidade_meses"]
+    ger = _geracao_semanal()
+    fonte = cfg.get("pilha_fonte_capacidade", "disponibilidade")
+    disp = ons.carregar_disponibilidade_termica() if fonte == "disponibilidade" else None
+    k = cfg["pilha_disponibilidade_semanas"]
     pilhas, linhas = {}, []
     for semana, g in cvu.groupby("dat_iniciosemana"):
         ultima = g.sort_values("num_revisao").groupby("cod_usinaplanejamento").tail(1)
-        per = semana.to_period("M")
-        jan = cap[(cap["t"] <= per) & (cap["t"] > per - n)].groupby("cod").agg(pmax=("pmax", "max"), inflex=("inflex", "mean"),
-                                                                                subsistema=("subsistema", "last"))
-        jan["capacidade"] = (jan["pmax"] - jan["inflex"]).clip(lower=0)
+        jan = _disponibilidade_declarada(ger, disp, semana) if disp is not None else _disponibilidade_geracao(ger, semana, k)
+        if jan.empty:
+            continue
         p = ultima.merge(jan[["capacidade", "subsistema"]], left_on="cod_usinaplanejamento", right_index=True, how="inner")
         p = p[(p["val_cvu"] > 0) & (p["capacidade"] >= cfg["pilha_min_flex_mw"])].sort_values(["val_cvu", "capacidade"])
         if p.empty:
