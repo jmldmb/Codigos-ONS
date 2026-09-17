@@ -328,10 +328,12 @@ def curtailment():
     _salvar(fig, out, "scatter_cl_curtailment.png")
 
     cols = ["din_instante", "ano", "mes", "dia", "hora", "FD", "R", "termica_flexivel", "carga_liquida_historica",
-            "curtailment_eolica_mw", "curtailment_solar_mw", "curtailment_mw"]
+            "curtailment_eolica_mw", "curtailment_solar_mw", "curtailment_mw", "curtailment_ene_mw", "curtailment_rede_mw"]
     df[cols].to_csv(out / "carga_liquida_curtailment.csv", index=False)
     resumo = df.groupby(["ano", "mes"]).agg(carga_liquida=("carga_liquida_historica", "mean"),
                                             curtailment_mw=("curtailment_mw", "mean"),
+                                            curtailment_ene_mw=("curtailment_ene_mw", "mean"),
+                                            curtailment_rede_mw=("curtailment_rede_mw", "mean"),
                                             curtailment_gwh=("curtailment_mw", lambda s: s.sum() / 1000),
                                             horas_com_corte=("curtailment_mw", lambda s: int((s > 0).sum())))
     resumo.reset_index().to_csv(out / "resumo_mensal.csv", index=False)

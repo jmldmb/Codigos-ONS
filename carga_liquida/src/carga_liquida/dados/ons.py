@@ -172,24 +172,32 @@ def carregar_ena(inicio: str | None = None, fim: str | None = None) -> pd.DataFr
 
 
 def _coff_por_patamar(fonte: str, inicio: str, fim: str) -> pd.DataFrame:
-    """Constrained-off (eólica|solar) agregado ao SIN por patamar semi-horário: geração, corte e potencial.
+    """Constrained-off (eólica|solar) agregado ao SIN por patamar semi-horário: geração, corte (total, energético
+    e de rede) e potencial.
 
     Geração não realizada (GNRa) = val_geracaonaorealizadaapurada quando existe (arquivos >= 2025-01),
     senão max(0, referência - geração) nos patamares com razão de restrição. Valores em MWmed do patamar.
+    Sem restrição: `cod_razaorestricao` é '' até 2024-12 e NaN a partir de 2025-01 — os dois são tratados como
+    "sem corte" (contar o '' como restrição inflava o potencial em ~0,5 GW médios em 2024).
+    corte_ene_mw = razão ENE (sobra de energia no SIN, o que o despacho reproduz); corte_rede_mw = demais razões
+    (CNF confiabilidade, REL elétrica: restrições regionais de transmissão, quase todo NE).
     """
     name = {"eolica": "coff_eolica", "solar": "coff_fotovoltaica"}[fonte]
+    cols = ["geracao_mw", "corte_mw", "corte_ene_mw", "corte_rede_mw"]
     partes = []
     for p in _arquivos(name, inicio, fim):
         base = ["din_instante", "val_geracao", "val_geracaoreferencia", "cod_razaorestricao"]
         tem_apurada = "val_geracaonaorealizadaapurada" in pq.read_schema(p).names
         df = pd.read_parquet(p, columns=base + (["val_geracaonaorealizadaapurada"] if tem_apurada else []))
+        razao = df["cod_razaorestricao"].astype("string").str.strip().replace("", pd.NA)
         gnr = df["val_geracaonaorealizadaapurada"].astype(float) if tem_apurada else pd.Series(float("nan"), index=df.index)
-        proxy = (df["val_geracaoreferencia"] - df["val_geracao"]).clip(lower=0)
-        proxy = proxy.where(df["cod_razaorestricao"].notna(), 0.0)
-        df["corte_mw"] = gnr.where(gnr.notna(), proxy).fillna(0.0)
+        proxy = (df["val_geracaoreferencia"] - df["val_geracao"]).clip(lower=0).where(razao.notna(), 0.0)
+        df["corte_mw"] = gnr.where(gnr.notna(), proxy).fillna(0.0).where(razao.notna(), 0.0)
+        df["corte_ene_mw"] = df["corte_mw"].where((razao == "ENE").fillna(False), 0.0)
+        df["corte_rede_mw"] = df["corte_mw"] - df["corte_ene_mw"]
         df["geracao_mw"] = df["val_geracao"].fillna(0.0)
-        partes.append(df.groupby("din_instante", as_index=False)[["geracao_mw", "corte_mw"]].sum())
-    df = pd.concat(partes, ignore_index=True).groupby("din_instante", as_index=False)[["geracao_mw", "corte_mw"]].sum()
+        partes.append(df.groupby("din_instante", as_index=False)[cols].sum())
+    df = pd.concat(partes, ignore_index=True).groupby("din_instante", as_index=False)[cols].sum()
     df["din_instante"] = pd.to_datetime(df["din_instante"])
     df = df[(df["din_instante"] >= inicio) & (df["din_instante"] <= fim)]
     df["potencial_mw"] = df["geracao_mw"] + df["corte_mw"]
@@ -203,21 +211,25 @@ def carregar_coff_horario(fonte: str, inicio: str | None = None, fim: str | None
     inicio, fim = inicio or ini, fim or end
     df = _coff_por_patamar(fonte, inicio, fim)
     df["din_instante"] = df["din_instante"].dt.floor("h")
-    return df.groupby("din_instante", as_index=False)[["geracao_mw", "corte_mw", "potencial_mw"]].mean()
+    return df.groupby("din_instante", as_index=False)[["geracao_mw", "corte_mw", "corte_ene_mw", "corte_rede_mw", "potencial_mw"]].mean()
 
 
 def carregar_curtailment(inicio: str | None = None, fim: str | None = None) -> pd.DataFrame:
-    """Curtailment eólico + solar horário do SIN (MW médios): curtailment_eolica_mw, curtailment_solar_mw, curtailment_mw."""
+    """Curtailment eólico + solar horário do SIN (MW médios): curtailment_{eolica|solar}_mw (total) e as parcelas
+    curtailment_{eolica|solar}_{ene|rede}_mw; totais curtailment_mw, curtailment_ene_mw, curtailment_rede_mw."""
     partes = []
     for fonte in ("eolica", "solar"):
         try:
-            d = carregar_coff_horario(fonte, inicio, fim)[["din_instante", "corte_mw"]]
+            d = carregar_coff_horario(fonte, inicio, fim)[["din_instante", "corte_mw", "corte_ene_mw", "corte_rede_mw"]]
         except FileNotFoundError as e:
             logger.warning(str(e))
             continue
-        partes.append(d.rename(columns={"corte_mw": f"curtailment_{fonte}_mw"}).set_index("din_instante"))
+        partes.append(d.rename(columns={"corte_mw": f"curtailment_{fonte}_mw", "corte_ene_mw": f"curtailment_{fonte}_ene_mw",
+                                        "corte_rede_mw": f"curtailment_{fonte}_rede_mw"}).set_index("din_instante"))
     if not partes:
         raise FileNotFoundError("Nenhum arquivo RESTRICAO_COFF_* encontrado (datasets coff_eolica / coff_fotovoltaica)")
     wide = pd.concat(partes, axis=1).fillna(0.0)
-    wide["curtailment_mw"] = wide.sum(axis=1)
+    fontes = [c.split("_")[1] for c in wide.columns if c.count("_") == 2]
+    for suf in ("", "_ene", "_rede"):
+        wide[f"curtailment{suf}_mw"] = wide[[f"curtailment_{f}{suf}_mw" for f in fontes]].sum(axis=1)
     return wide.reset_index()

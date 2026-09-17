@@ -2,7 +2,11 @@
 
 Colunas (MW médios; ENA em MWmed):
     carga, eolica, solar_centralizada, solar_distribuida, ena_armazenavel, termica_total,
-    termica_flexivel, inflexterm, historico (bool)
+    termica_flexivel, curtailment_rede_eolica, curtailment_rede_solar, inflexterm, historico (bool)
+
+eolica e solar_centralizada são POTENCIAL (geração + corte); curtailment_rede_* é o corte de rede (CNF/REL) que
+se subtrai antes do despacho (o energético o despacho decide). Antes do COFF (2023-10) a eólica é a geração
+do balanço, já pós-corte, e o corte de rede é 0.
 
 Anos com dado observado vêm dos brutos (BALANCO_ENERGIA, COFF, geração por usina, ENA, térmica
 despacho) — o legado tinha esses números copiados à mão em data.py. Anos sem dado vêm de
@@ -20,7 +24,8 @@ from ..observado import carga_liquida as cl
 
 logger = get_logger("premissas")
 
-COLS = ["carga", "eolica", "solar_centralizada", "solar_distribuida", "ena_armazenavel", "termica_total", "termica_flexivel"]
+COLS = ["carga", "eolica", "solar_centralizada", "solar_distribuida", "ena_armazenavel", "termica_total", "termica_flexivel",
+        "curtailment_rede_eolica", "curtailment_rede_solar"]
 
 
 def _mensal(df: pd.DataFrame, col_tempo: str, cols: dict) -> pd.DataFrame:
@@ -45,9 +50,9 @@ def historico() -> pd.DataFrame:
     # eólica: potencial (geração + corte) do COFF quando existe; antes disso, geração do balanço
     try:
         w = ons.carregar_coff_horario("eolica")
-        out = out.join(_mensal(w, "din_instante", {"potencial_mw": "eolica_potencial"}))
+        out = out.join(_mensal(w, "din_instante", {"potencial_mw": "eolica_potencial", "corte_rede_mw": "curtailment_rede_eolica"}))
     except FileNotFoundError:
-        out["eolica_potencial"] = float("nan")
+        out["eolica_potencial"] = out["curtailment_rede_eolica"] = float("nan")
     out["eolica"] = out["eolica_potencial"].fillna(out["eolica_balanco"])
 
     # solar: centralizada = potencial COFF FV (>= 2024-04) ou geração por usina não-MMGD; distribuída = MMGD
@@ -59,9 +64,9 @@ def historico() -> pd.DataFrame:
     out = out.join(_mensal(ger.fillna({c: 0.0 for c in cols}), "din_instante", cols))
     try:
         s = ons.carregar_coff_horario("solar")
-        out = out.join(_mensal(s, "din_instante", {"potencial_mw": "solar_cent_potencial"}))
+        out = out.join(_mensal(s, "din_instante", {"potencial_mw": "solar_cent_potencial", "corte_rede_mw": "curtailment_rede_solar"}))
     except FileNotFoundError:
-        out["solar_cent_potencial"] = float("nan")
+        out["solar_cent_potencial"] = out["curtailment_rede_solar"] = float("nan")
     out["solar_centralizada"] = out["solar_cent_potencial"].fillna(out["solar_cent_usina"])
     if "solar_distribuida" not in out.columns:
         out["solar_distribuida"] = float("nan")
@@ -76,6 +81,7 @@ def historico() -> pd.DataFrame:
     hist = cl.carregar_historico()
     out = out.join(_mensal(hist, "din_instante", {"termica_flexivel": "termica_flexivel"}))
 
+    out[["curtailment_rede_eolica", "curtailment_rede_solar"]] = out[["curtailment_rede_eolica", "curtailment_rede_solar"]].fillna(0.0)
     out = out.reset_index()
     out = out[[_mes_completo(a, m, ultimo) for a, m in zip(out["ano"], out["mes"])]]
     out["historico"] = True
@@ -89,15 +95,17 @@ def projecoes() -> pd.DataFrame:
         proj = yaml.safe_load(f)
     chave = {"carga_mwmed": "carga", "eolica_mwmed": "eolica", "solar_centralizada_mwmed": "solar_centralizada",
              "solar_distribuida_mwmed": "solar_distribuida", "ena_armazenavel_mwmed": "ena_armazenavel",
-             "termica_total_mwmed": "termica_total", "termica_flexivel_mwmed": "termica_flexivel"}
+             "termica_total_mwmed": "termica_total", "termica_flexivel_mwmed": "termica_flexivel",
+             "curtailment_rede_eolica_mwmed": "curtailment_rede_eolica", "curtailment_rede_solar_mwmed": "curtailment_rede_solar"}
     rows = {}
     for k, col in chave.items():
         for ano, meses in (proj.get(k) or {}).items():
             for mes, v in meses.items():
                 rows.setdefault((int(ano), int(mes)), {})[col] = float(v)
     df = pd.DataFrame([{"ano": a, "mes": m, **v} for (a, m), v in sorted(rows.items())])
-    if "termica_flexivel" not in df.columns:
-        df["termica_flexivel"] = float("nan")
+    for c in ("termica_flexivel", "curtailment_rede_eolica", "curtailment_rede_solar"):
+        if c not in df.columns:
+            df[c] = float("nan")
     df["historico"] = False
     return df[["ano", "mes", *COLS, "historico"]]
 
@@ -124,6 +132,13 @@ def montar(anos=None, meses=None) -> pd.DataFrame:
         df["termica_flex_base"] = df["termica_flexivel"].fillna(0.0)
     else:
         df["termica_flex_base"] = 0.0
+    # curtailment de rede (premissa exógena): observado no histórico, yaml nas projeções (0 se ausente)
+    for c in ("curtailment_rede_eolica", "curtailment_rede_solar"):
+        sem = ~df["historico"] & df[c].isna()
+        if sem.any() and cfg.get("curtailment_rede", True):
+            logger.warning(f"Projeções sem {c}_mwmed em projecoes.yaml (corte de rede = 0): "
+                           f"{[(int(a), int(m)) for a, m in zip(df.loc[sem, 'ano'], df.loc[sem, 'mes'])]}")
+        df[c] = df[c].fillna(0.0) if cfg.get("curtailment_rede", True) else 0.0
     if anos is not None:
         df = df[df["ano"].isin(list(anos))]
     if meses is not None:

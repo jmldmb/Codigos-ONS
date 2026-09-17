@@ -2,7 +2,9 @@
 
 Para cada (ano, mês) das premissas e cada cenário: percorre os dias do mês, amostra carga (v6 com
 temperatura real quando existe), eólica (AR(1)) e solar (determinística, cent + dist), despacha hora a
-hora e precifica. Saída: um registro por (cenário, dia, hora) com todas as componentes, incluindo
+hora e precifica. Antes do despacho, subtrai da eólica e da solar centralizada o curtailment de REDE
+(premissa mensal exógena, samplers/curtailment_rede.py); o despacho só decide o corte energético.
+Saída: um registro por (cenário, dia, hora) com todas as componentes, incluindo
 
     carga_liquida = carga − eólica_pós − solar_pós − inflexterm − FD   (≡ R + térmica_flex)
 
@@ -22,6 +24,7 @@ from .despacho import despachar, despachar_va
 from .hidro_fd import parametros as params_fd
 from .preco import Precificador
 from .samplers.carga import CargaSampler
+from .samplers.curtailment_rede import CurtailmentRedeSampler
 from .samplers.eolica import EolicaSampler
 from .samplers.solar import SolarSampler
 from .samplers.termica import TermicaSampler
@@ -47,6 +50,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
     prem = prem.dropna(subset=["carga", "eolica", "solar_centralizada", "solar_distribuida", "ena_armazenavel", "inflexterm"])
     s_carga, s_eol = CargaSampler(), EolicaSampler()
     s_cent, s_dist = SolarSampler("centralizada"), SolarSampler("distribuida")
+    s_rede = CurtailmentRedeSampler() if cfg.get("curtailment_rede", True) else None
     modo_va = cfg.get("termica_flexivel") == "valor_agua"
     s_term = TermicaSampler() if not modo_va else None
     va_dia = valor_agua.serie_diaria(anos, meses) if modo_va else None
@@ -75,6 +79,12 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 carga = s_carga.gerar_dia(d, r.carga, temp_mes, temp_h)
                 eol = s_eol.gerar_dia(mes, r.eolica, rng)
                 cent, dist = s_cent.gerar_dia(mes, r.solar_centralizada), s_dist.gerar_dia(mes, r.solar_distribuida)
+                if s_rede is not None:                     # corte de rede (CNF/REL) sai antes do despacho
+                    rede_eol = s_rede.gerar_dia("eolica", mes, r.curtailment_rede_eolica, eol)
+                    rede_cent = s_rede.gerar_dia("solar", mes, r.curtailment_rede_solar, cent)
+                else:
+                    rede_eol, rede_cent = np.zeros(24), np.zeros(24)
+                eol_liq, cent_liq = eol - rede_eol, cent - rede_cent
                 if modo_va:
                     va = va_dia.loc[pd.Timestamp(d)].to_dict() if pd.Timestamp(d) in va_dia.index else {}
                     if not va or np.isnan(va.get("SE", np.nan)):
@@ -88,13 +98,19 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                     continue
                 for h in range(24):
                     if modo_va:
-                        res = despachar_va(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
+                        res = despachar_va(carga[h], eol_liq[h], cent_liq[h], dist[h], r.inflexterm, r.ena_armazenavel,
                                            mes, h, tipo == "DU", va, pilha_arr, pfd)
                     else:
-                        res = despachar(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
+                        res = despachar(carga[h], eol_liq[h], cent_liq[h], dist[h], r.inflexterm, r.ena_armazenavel,
                                         mes, h, tipo == "DU", pfd, termica_base=base[h])
                     if res is None:
                         continue
+                    # curtailment: energético (despacho) + rede (premissa); val_gereolica/solar_cent = potencial bruto
+                    res = {**res, "curtailment_ene": res["curtailment"], "curtailment_rede_eolica": rede_eol[h],
+                           "curtailment_rede_solar": rede_cent[h], "curtailment_rede": rede_eol[h] + rede_cent[h],
+                           "curtailment": res["curtailment"] + rede_eol[h] + rede_cent[h],
+                           "curtailment_eolica": res["curtailment_eolica"] + rede_eol[h],
+                           "curtailment_solar_cent": res["curtailment_solar_cent"] + rede_cent[h]}
                     # carga líquida = R + térmica flexível (base + extra) = carga − renováveis pós − inflexível − FD
                     cl_ = carga[h] - res["val_gereolica_depois_corte"] - res["val_gersolar_depois_corte"] - r.inflexterm - res["val_gerhidro_fd"]
                     registros.append({
@@ -118,7 +134,8 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         return df
     df["din_instante"] = pd.to_datetime(df[["ano", "mes", "dia", "hora"]].rename(columns={"ano": "year", "mes": "month", "dia": "day", "hora": "hour"}))
     logger.info(f"concluído: {len(df):,} registros em {time.time() - t0:.0f}s; erros de balanço: {int(df['val_erro'].sum())}; "
-                f"carga líquida média {df['carga_liquida'].mean():,.0f} MW; curtailment médio {df['curtailment'].mean():,.0f} MW")
+                f"carga líquida média {df['carga_liquida'].mean():,.0f} MW; curtailment médio {df['curtailment'].mean():,.0f} MW "
+                f"(energético {df['curtailment_ene'].mean():,.0f} + rede {df['curtailment_rede'].mean():,.0f})")
     if "regime" in df.columns:
         logger.info("regimes: " + ", ".join(f"{k} {100 * v:.1f}%" for k, v in df["regime"].value_counts(normalize=True).items()))
     if salvar:
@@ -127,6 +144,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         resumo = df.groupby(["ano", "mes"]).agg(carga=("val_carga", "mean"), carga_liquida=("carga_liquida", "mean"),
                                                 hidro_r=("val_gerhidro_reservatorio", "mean"), hidro_fd=("val_gerhidro_fd", "mean"),
                                                 termica_flex=("val_term_despacho", "mean"), curtailment=("curtailment", "mean"),
+                                                curtailment_ene=("curtailment_ene", "mean"), curtailment_rede=("curtailment_rede", "mean"),
                                                 pld=("pld", "mean")).round(1)
         resumo.to_csv(out / "resumo_mensal.csv")
         logger.info(f"salvo em {out}")

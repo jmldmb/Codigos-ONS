@@ -4,6 +4,7 @@ Substitui os 13 scripts de comparação/backtest do carga_liquida antigo. Alinha
 cenários simulados com o observado e mede erro por componente:
 
     carga (balanço)  eólica pós-corte  solar pós-corte  hidro FD  hidro R  térmica flexível  carga líquida
+    curtailment (eólica + solar centralizada: total e só o energético, vs COFF >= 2023-10)
     e o PLD simulado contra o CMO observado (subsistema de config.carga_liquida.cmo_subsistema).
 
 Saídas em Output/validacao/: comparacao_horaria.csv, metricas.csv, metricas_por_ano_mes.csv e gráficos.
@@ -32,6 +33,8 @@ COMPONENTES = [
     ("termica_flex", "termica_flexivel", "val_term_despacho"),
     ("carga_liquida", "carga_liquida_historica", "carga_liquida"),
     ("pld_vs_cmo", "cmo_obs", "pld"),
+    ("curtailment", "curtailment_obs", "curtailment_cent"),          # eólica + solar centralizada (o COFF não tem MMGD)
+    ("curtailment_ene", "curtailment_ene_obs", "curtailment_ene_cent"),
 ]
 
 
@@ -50,9 +53,18 @@ def montar_comparacao() -> pd.DataFrame:
     cmo["din_instante"] = cmo["din_instante"].dt.floor("h")
     cmo = cmo.groupby("din_instante", as_index=False)["val_cmo"].mean().rename(columns={"val_cmo": "cmo_obs"})
     obs = obs.merge(ger, on="din_instante", how="left").merge(bal, on="din_instante", how="left").merge(cmo, on="din_instante", how="left")
+    try:
+        curt = ons.carregar_curtailment()[["din_instante", "curtailment_mw", "curtailment_ene_mw"]]
+        obs = obs.merge(curt.rename(columns={"curtailment_mw": "curtailment_obs", "curtailment_ene_mw": "curtailment_ene_obs"}),
+                        on="din_instante", how="left")
+    except FileNotFoundError as e:
+        logger.warning(str(e))
+        obs["curtailment_obs"] = obs["curtailment_ene_obs"] = np.nan
 
     sim = simulacao.carregar_resultados()
-    cols_sim = list(dict.fromkeys([c for _, _, c in COMPONENTES] + ["curtailment"]))
+    sim["curtailment_cent"] = sim["curtailment"] - sim["curtailment_solar_dist"]
+    sim["curtailment_ene_cent"] = sim.get("curtailment_ene", sim["curtailment"]) - sim["curtailment_solar_dist"]
+    cols_sim = list(dict.fromkeys([c for _, _, c in COMPONENTES] + ["curtailment"] + (["valor_agua"] if "valor_agua" in sim else [])))
     agg = sim.groupby("din_instante")[cols_sim].mean()
     q = sim.groupby("din_instante")["carga_liquida"].quantile([0.1, 0.9]).unstack()
     agg["carga_liquida_p10"], agg["carga_liquida_p90"] = q[0.1], q[0.9]
@@ -73,7 +85,7 @@ def _metricas(df: pd.DataFrame) -> pd.DataFrame:
         e = d[s] - d[o]
         rows.append({"componente": rot, "obs_medio": d[o].mean(), "sim_medio": d[s].mean(), "bias_mw": e.mean(),
                      "mae_mw": e.abs().mean(), "rmse_mw": np.sqrt((e ** 2).mean()),
-                     "mae_pct_media": e.abs().mean() / abs(d[o].mean()) * 100,  # MAE relativo à média observada
+                     "mae_pct_media": e.abs().mean() / abs(d[o].mean()) * 100 if d[o].mean() != 0 else np.nan,  # MAE relativo à média observada
                      "r2": 1 - (e ** 2).sum() / ((d[o] - d[o].mean()) ** 2).sum() if d[o].std() > 0 else np.nan,
                      "n": len(d)})
     return pd.DataFrame(rows)
@@ -95,11 +107,10 @@ def metricas_intradiarias(df: pd.DataFrame) -> pd.DataFrame:
         e = ds - do
         rows.append({"componente": rot, "corr_intradiaria": do.corr(ds), "r2_intradiario": 1 - (e ** 2).sum() / ((do - do.mean()) ** 2).sum(),
                      "mae_intradiario": e.abs().mean(), "std_sim_obs": ds.std() / do.std()})
-    if "valor_agua" in d and "cmo_obs" in d:
+    if "pld" in d and "cmo_obs" in d:                      # mesma definição dos dois lados: > 1,5x a mediana da semana operativa
         sem = (d["din_instante"] - pd.to_timedelta((d["din_instante"].dt.weekday + 2) % 7, unit="D")).dt.normalize()
-        med = d.groupby(sem)["cmo_obs"].median()
-        spk_o = d["cmo_obs"] > 1.5 * sem.map(med).replace(0, np.nan)
-        spk_s = d["pld"] > 1.5 * d["valor_agua"]
+        spk_o = d["cmo_obs"] > 1.5 * sem.map(d.groupby(sem)["cmo_obs"].median()).replace(0, np.nan)
+        spk_s = d["pld"] > 1.5 * sem.map(d.groupby(sem)["pld"].median()).replace(0, np.nan)
         tp = (spk_o & spk_s).sum()
         rows.append({"componente": "spikes (CMO > 1,5x mediana semanal)", "obs_pct": 100 * spk_o.mean(), "sim_pct": 100 * spk_s.mean(),
                      "precisao": tp / max(spk_s.sum(), 1), "recall": tp / max(spk_o.sum(), 1)})
@@ -132,17 +143,15 @@ def validar():
     # 1. médias mensais observado vs simulado, por componente
     mens = df.groupby(["ano", "mes"]).mean(numeric_only=True).reset_index()
     mens["t"] = pd.to_datetime(mens[["ano", "mes"]].assign(day=1).rename(columns={"ano": "year", "mes": "month"}))
-    fig, axes = plt.subplots(3, 3, figsize=(22, 16))
+    fig, axes = plt.subplots(4, 3, figsize=(22, 20))
     fig.suptitle("Médias mensais: observado vs simulado", fontsize=16, fontweight="bold")
     for ax, (rot, o, s) in zip(axes.flatten(), COMPONENTES):
         ax.plot(mens["t"], mens[o], "o-", color="black", label="observado" if rot != "pld_vs_cmo" else "CMO observado")
         ax.plot(mens["t"], mens[s], "s--", color="tab:red", label="simulado" if rot != "pld_vs_cmo" else "PLD simulado")
         ax.set(title=rot, ylabel="R$/MWh" if rot == "pld_vs_cmo" else "MW")
         ax.legend()
-    ax = axes.flatten()[-1]
-    ax.plot(mens["t"], mens["curtailment"], "s--", color="tab:red", label="curtailment simulado")
-    ax.set(title="curtailment (simulado)", ylabel="MW")
-    ax.legend()
+    for ax in axes.flatten()[len(COMPONENTES):]:
+        ax.axis("off")
     fig.tight_layout()
     fig.savefig(out / "medias_mensais.png", dpi=g["dpi"], bbox_inches="tight")
     plt.close(fig)

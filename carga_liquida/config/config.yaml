@@ -151,6 +151,11 @@ modelo:
   termica_flexivel: valor_agua
   valor_agua_fonte: cmo                   # histórico: cmo (mediana semanal do CMO, por subsistema) | pilha (CVU na térmica de mérito média)
   termica_flexivel_perfil: observado      # modulação horária da base: flat | observado (treinar termica)
+  # Curtailment de REDE (CNF/REL do COFF) da eólica e da solar centralizada como PREMISSA mensal exógena
+  # (histórico: observado; projeções: curtailment_rede_*_mwmed em projecoes.yaml), alocado por hora pelo perfil
+  # observado (treinar curtailment_rede) e subtraído antes do despacho. O corte energético (ENE) o despacho decide.
+  # false -> nenhum corte de rede (só o energético), como antes.
+  curtailment_rede: true
   # A carga do balanço não inclui a exportação (val_intercambio da linha SIN), mas a geração observada sim;
   # somar fecha a identidade geração = carga + exportação (~0,2-1 GW) e alinha a carga líquida simulada à observada.
   carga_inclui_intercambio: true
