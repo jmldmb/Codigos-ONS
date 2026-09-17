@@ -1,4 +1,6 @@
-"""Sampler solar determinístico: perfil horário médio por mês, separado em centralizada e distribuída.
+"""Sampler solar: perfil horário médio por mês, separado em centralizada e distribuída; opcionalmente um fator
+diário D (nebulosidade; _diario.py, `solar_fator_diario`) — std de D 0,06–0,16 (verão) na centralizada, 0,06–0,09 na
+distribuída, contra 0,13–0,40 na eólica. Sem ruído intradiário.
 
     centralizada: potencial (geração + corte) do COFF fotovoltaico (>= 2024-04); antes, geração das
                   usinas FOTOVOLTAICA não-MMGD do dataset de geração por usina
@@ -12,6 +14,7 @@ import pandas as pd
 from ...config import get_logger, load_config
 from ...dados import ons
 from ...observado import carga_liquida as cl
+from . import _diario
 from ._base import carregar_json, interpolar_meses_faltantes, janela_treino, perfil_proporcional_por_mes, salvar_json
 
 logger = get_logger("sampler.solar")
@@ -42,10 +45,19 @@ def treinar() -> dict:
     out = {}
     for nome, serie in (("solar_centralizada", _serie_centralizada), ("solar_distribuida", _serie_distribuida)):
         df = janela_treino(serie())
-        perfis = interpolar_meses_faltantes(perfil_proporcional_por_mes(df, "mw"))
+        perfis = perfil_proporcional_por_mes(df, "mw")
+        din = _diario.estimar(df, "mw", perfis)
+        perfis = interpolar_meses_faltantes({m: {**p, **din.get(m, {})} for m, p in perfis.items()})
+        for k in ("rho_d", "std_d"):
+            media = float(np.mean([v[k] for v in perfis.values() if k in v]))
+            for m in perfis:
+                perfis[m].setdefault(k, media)
+        for m in perfis:
+            perfis[m].setdefault("quantis_d", next(v["quantis_d"] for v in perfis.values() if "quantis_d" in v))
         for mes, p in sorted(perfis.items()):
             prop = np.array(p["perfil_proporcional"])
-            logger.info(f"  {nome} mês {mes:2d}: {p['n_meses']} meses, pico {int(np.argmax(prop)):2d}h ({100 * prop.max():.1f}%)")
+            logger.info(f"  {nome} mês {mes:2d}: {p['n_meses']} meses, pico {int(np.argmax(prop)):2d}h ({100 * prop.max():.1f}%), "
+                        f"D: std {p['std_d']:.2f} ρ {p['rho_d']:.2f}")
         salvar_json(nome, {"meta": {"periodo": f"{df['din_instante'].min()} a {df['din_instante'].max()}"},
                            "meses": {str(k): v for k, v in perfis.items()}})
         out[nome] = perfis
@@ -57,8 +69,11 @@ class SolarSampler:
         cfg = load_config()["modelo"]
         self.tipo = tipo
         self.shape = cfg[f"solar_{tipo}_shape"]
+        self.fator_diario = cfg.get("solar_fator_diario", False)
         p = params or carregar_json(f"solar_{tipo}")["meses"]
         self.p = {int(k): v for k, v in p.items()}
+        if self.fator_diario and "quantis_d" not in next(iter(self.p.values())):
+            raise FileNotFoundError(f"Parâmetros solar_{tipo} sem fator diário. Rode: python run.py treinar solar")
 
     def perfil(self, mes: int) -> np.ndarray:
         prop = np.array(self.p[mes]["perfil_proporcional"])
@@ -70,3 +85,9 @@ class SolarSampler:
     def gerar_dia(self, mes: int, mw_medios: float) -> np.ndarray:
         """24 valores (MW) com média = mw_medios (determinístico)."""
         return self.perfil(mes) * mw_medios * 24
+
+    def gerar_mes(self, mes: int, mw_medios: float, n_dias: int, rng: np.random.Generator | None = None) -> np.ndarray:
+        """Matriz (n_dias, 24) em MW com média do mês = mw_medios; fator diário só se `solar_fator_diario`."""
+        if not self.fator_diario:
+            return np.tile(self.gerar_dia(mes, mw_medios), (n_dias, 1))
+        return _diario.gerar_mes(self.perfil(mes), self.p[mes], mw_medios, n_dias, rng or np.random.default_rng(), ruido=False)

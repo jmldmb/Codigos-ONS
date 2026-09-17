@@ -1,8 +1,8 @@
 """Simulação Monte Carlo horária (porte de mini_dessem/simulation.py).
 
-Para cada (ano, mês) das premissas e cada cenário: percorre os dias do mês, amostra carga (v6 com
-temperatura real quando existe), eólica (AR(1)) e solar (determinística, cent + dist), despacha hora a
-hora e precifica. Antes do despacho, subtrai da eólica e da solar centralizada o curtailment de REDE
+Para cada (ano, mês) das premissas e cada cenário: amostra o mês inteiro de eólica (perfil × fator diário
+AR(1) × ruído horário) e de solar (cent + dist; fator diário opcional), depois percorre os dias, amostra a carga
+(v6 com temperatura real quando existe), despacha hora a hora e precifica. Antes do despacho, subtrai da eólica e da solar centralizada o curtailment de REDE
 (premissa mensal exógena, samplers/curtailment_rede.py); o despacho só decide o corte energético.
 Saída: um registro por (cenário, dia, hora) com todas as componentes, incluindo
 
@@ -72,13 +72,14 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         temp_mes = _temperatura_mensal(ano, mes, clim, temp_mensal)
         n_dias = calendar.monthrange(ano, mes)[1]
         for sim in range(1, n_sim + 1):
+            eol_mes = s_eol.gerar_mes(mes, r.eolica, n_dias, rng)
+            cent_mes, dist_mes = s_cent.gerar_mes(mes, r.solar_centralizada, n_dias, rng), s_dist.gerar_mes(mes, r.solar_distribuida, n_dias, rng)
             for dia in range(1, n_dias + 1):
                 d = date(ano, mes, dia)
                 tipo = feriados.tipo_dia(d)
                 temp_h = temperatura.temperaturas_dia(ano, mes, dia) if clim else None
                 carga = s_carga.gerar_dia(d, r.carga, temp_mes, temp_h)
-                eol = s_eol.gerar_dia(mes, r.eolica, rng)
-                cent, dist = s_cent.gerar_dia(mes, r.solar_centralizada), s_dist.gerar_dia(mes, r.solar_distribuida)
+                eol, cent, dist = eol_mes[dia - 1], cent_mes[dia - 1], dist_mes[dia - 1]
                 if s_rede is not None:                     # corte de rede (CNF/REL) sai antes do despacho
                     rede_eol = s_rede.gerar_dia("eolica", mes, r.curtailment_rede_eolica, eol)
                     rede_cent = s_rede.gerar_dia("solar", mes, r.curtailment_rede_solar, cent)

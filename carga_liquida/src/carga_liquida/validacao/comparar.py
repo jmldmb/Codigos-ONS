@@ -117,6 +117,32 @@ def metricas_intradiarias(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+QUANTIS = (0.1, 0.5, 0.9)
+DISTRIB = [("carga_liquida", "carga_liquida_historica", "carga_liquida"), ("curtailment_ene", "curtailment_ene_obs", "curtailment_ene_cent"),
+           ("termica_flex", "termica_flexivel", "val_term_despacho"), ("pld_vs_cmo", "cmo_obs", "pld"), ("hidro_r", "R", "val_gerhidro_reservatorio")]
+
+
+def metricas_distribuicao(obs: pd.DataFrame) -> pd.DataFrame:
+    """Distribuição por mês: quantis das horas observadas vs quantis das horas simuladas (todos os cenários juntos).
+    É o critério para mudanças de VARIABILIDADE (fator diário): a média dos cenários não muda, a largura sim."""
+    sim = simulacao.carregar_resultados()
+    sim["curtailment_ene_cent"] = sim.get("curtailment_ene", sim["curtailment"]) - sim["curtailment_solar_dist"]
+    sim["ano"], sim["mes"] = sim["din_instante"].dt.year, sim["din_instante"].dt.month
+    obs = obs.assign(ano=obs["din_instante"].dt.year, mes=obs["din_instante"].dt.month)
+    rows = []
+    for (a, m), o in obs.groupby(["ano", "mes"]):
+        s = sim[(sim["ano"] == a) & (sim["mes"] == m)]
+        if s.empty:
+            continue
+        for rot, co, cs in DISTRIB:
+            oo = o[co].dropna()
+            if len(oo) < 24 * 20:
+                continue
+            for q in QUANTIS:
+                rows.append({"ano": a, "mes": m, "componente": rot, "quantil": q, "obs": oo.quantile(q), "sim": s[cs].quantile(q)})
+    return pd.DataFrame(rows)
+
+
 def validar():
     g = load_config()["graficos"]
     df = montar_comparacao()
@@ -139,6 +165,13 @@ def validar():
             logger.info(f"  {r.componente}: obs {r.obs_pct:.1f}%  sim {r.sim_pct:.1f}%  precisão {r.precisao:.2f}  recall {r.recall:.2f}")
     por_mes = pd.concat([_metricas(d).assign(ano=a, mes=m) for (a, m), d in df.groupby(["ano", "mes"])], ignore_index=True)
     por_mes.to_csv(out / "metricas_por_ano_mes.csv", index=False)
+    dist = metricas_distribuicao(df)
+    dist.to_csv(out / "distribuicao_mensal.csv", index=False)
+    for rot, d in dist.groupby("componente", sort=False):
+        partes = []
+        for q, dq in d.groupby("quantil"):
+            partes.append(f"P{int(q * 100)}: obs {dq['obs'].mean():7,.0f} sim {dq['sim'].mean():7,.0f} (MAE {(dq['sim'] - dq['obs']).abs().mean():5,.0f})")
+        logger.info(f"  distribuição {rot:<14} " + " | ".join(partes))
 
     # 1. médias mensais observado vs simulado, por componente
     mens = df.groupby(["ano", "mes"]).mean(numeric_only=True).reset_index()
