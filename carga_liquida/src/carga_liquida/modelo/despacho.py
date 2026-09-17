@@ -14,6 +14,7 @@ from scipy.optimize import brentq
 
 from ..config import load_config
 from .hidro_fd import calcular_fd
+from .hidro_fd import parametros as parametros_fd
 
 
 def _cfg():
@@ -79,8 +80,36 @@ def _curtailment_cascata(excesso, eol, cent, dist):
     return max(eol - c_eol, 0), max(cent - c_cent, 0), max(dist - c_dist, 0), (c_eol, c_cent, c_dist)
 
 
+def r_medio_semana(carga: float, eolica: float, solar: float, inflexterm: float, termica_base: float, ena: float, mes: int,
+                   frac_du: float, params_fd: dict | None = None) -> float:
+    """R médio da semana pelo balanço com as premissas (ponto fixo com a FD média das 24 h e do mix DU/FDS)."""
+    cfg = _cfg()
+    lim, mn = cfg["limite_hidro_reservatorio"], cfg["min_hidro_reservatorio"]
+    p = params_fd or parametros_fd()
+    # FD média das 24 h e do mix DU/FDS, em forma fechada (a regressão é linear nos pesos por hora)
+    ghr_m = float(np.mean(list(p["ghr_hora"].values()))); ph_m = float(np.mean(list(p["peso_hora"].values())))
+    pd_m = frac_du * p["peso_weekday"] + (1 - frac_du) * p["peso_fds"]
+    fd_medio = lambda r: p["intercept"] + ghr_m * r + p["r2"] * (r / 1000.0) ** 2 + p["ena"] * ena + p["peso_mes"][mes] + ph_m + pd_m  # noqa: E731
+    g = lambda r: carga - (eolica + solar + inflexterm + termica_base + fd_medio(r) + r)  # noqa: E731
+    if g(lim) > 0:
+        return lim
+    if g(mn) < 0:
+        return mn
+    return brentq(g, mn, lim, xtol=1.0)
+
+
+def limite_hidro(r_medio: float | None) -> float:
+    """Teto de R da semana: a + b·R_médio (config.modelo.limite_modulacao), limitado ao teto físico."""
+    cfg = _cfg()
+    m = cfg.get("limite_modulacao") or {}
+    if not m.get("ativo") or r_medio is None:
+        return cfg["limite_hidro_reservatorio"]
+    return float(min(m["a_mw"] + m["b"] * r_medio, cfg["limite_hidro_reservatorio"]))
+
+
 def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: float, inflexterm: float, ena: float,
-                 mes: int, hora: int, is_weekday: bool, va: dict, pilha, params_fd: dict | None = None) -> dict | None:
+                 mes: int, hora: int, is_weekday: bool, va: dict, pilha, params_fd: dict | None = None,
+                 lim: float | None = None) -> dict | None:
     """Despacho com valor da água (modo `termica_flexivel: valor_agua`), como DECOMP -> DESSEM.
 
     `va` = {subsistema: preço-base}; `pilha` = dict de arrays da semana (cvu, capacidade, subsistema).
@@ -93,7 +122,8 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
         sobra sem térmica base         -> curtailment em cascata; PLD = piso
     """
     cfg = _cfg()
-    lim, mn, piso = cfg["limite_hidro_reservatorio"], cfg["min_hidro_reservatorio"], cfg["pld_minimo"]
+    lim = lim if lim is not None else cfg["limite_hidro_reservatorio"]
+    mn, piso = cfg["min_hidro_reservatorio"], cfg["pld_minimo"]
     fd = lambda r: calcular_fd(mes, hora, is_weekday, r, ena, params_fd)  # noqa: E731
     cvu, cap, subs = pilha["cvu"], pilha["capacidade"], pilha["subsistema"]
     va_usina = np.array([va.get(s_, va.get("SE", 0.0)) for s_ in subs])
