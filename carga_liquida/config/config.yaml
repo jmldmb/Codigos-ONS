@@ -40,12 +40,6 @@ datasets:
     dir: "raw/CVU"
     freq: yearly
     start: "2022"
-  disponibilidade:      # disponibilidade operacional horária declarada por usina (UHE/UTE/UTN Tipo I e II-A)
-    path: "disponibilidade_usina_ho/DISPONIBILIDADE_USINA_{y}_{m}.parquet"
-    path_fallback: "disponibilidade_usina_ho/DISPONIBILIDADE_USINA_{y}_{m}.csv"   # 2022 só existe em csv
-    dir: "raw/disponibilidade"
-    freq: monthly
-    start: "2022-01"
   coff_eolica:          # constrained-off eólico por conjunto, semi-horário, com razão/origem (desde 2023-10)
     path: "restricao_coff_eolica_tm/RESTRICAO_COFF_EOLICA_{y}_{m}.parquet"
     dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_eolica"
@@ -141,16 +135,8 @@ modelo:
     inicio: "2022-01-01"                  # janela de treino dos samplers (fim = último dado observado)
     carga_min_obs_regressao: 30           # mínimo de horas por (tipo_dia, mês, hora) para a regressão v6
   # Limites operacionais (MW)
-  limite_hidro_reservatorio: 42000        # teto físico/legado (usado se limite_modulacao.ativo = false, e como máximo)
+  limite_hidro_reservatorio: 42000
   min_hidro_reservatorio: 14500
-  # Teto efetivo por modulação (observado 2023-26): R_max_semana ≈ a + b × R_médio_semana (R² 0,5). A disponibilidade
-  # das UHEs R (~51 GW) nunca é o limite; o pico segue a energia hídrica alocada na semana (DECOMP -> DESSEM).
-  # DESATIVADO por padrão: no teste pareado intradiário (validacao) ele aumenta a dispersão do PLD nas horas erradas
-  # (MAE dos desvios 20,8 -> 22,8; térmica 306 -> 365; precisão dos spikes 0). Fica como opção.
-  limite_modulacao:
-    ativo: false
-    a_mw: 24300
-    b: 0.54
   # Térmica "inflexível" da simulação (o que o modelo NÃO decide):
   #   termica_total   -> geração térmica total observada/projetada (premissa do legado: val_inflexterm = val_gertermica)
   #   termica_forcada -> térmica total - térmica flexível observada (só o que é de fato forçado)
@@ -163,7 +149,7 @@ modelo:
   #               a hidro R fecha o balanço e o preço horário é o recurso marginal (VA | CVU extra | CVU reduzida | piso).
   #               A térmica flexível horária responde à carga líquida (DECOMP -> DESSEM).
   termica_flexivel: valor_agua
-  valor_agua_fonte: cmo                   # histórico: cmo (mediana semanal do CMO, POR SUBSISTEMA) | pilha (CVU na térmica de mérito média)
+  valor_agua_fonte: cmo                   # histórico: cmo (mediana semanal do CMO, por subsistema) | pilha (CVU na térmica de mérito média)
   termica_flexivel_perfil: observado      # modulação horária da base: flat | observado (treinar termica)
   # A carga do balanço não inclui a exportação (val_intercambio da linha SIN), mas a geração observada sim;
   # somar fecha a identidade geração = carga + exportação (~0,2-1 GW) e alinha a carga líquida simulada à observada.
@@ -190,12 +176,11 @@ modelo:
   pld_minimo: 61
   pld_offset_mw: 0                        # legado somava 3.500 MW ao despacho antes de ler a pilha (compensava a base ausente)
   # Pilha térmica (merit order) SEMANAL montada dos dados: CVU da semana operativa (dataset cvu, revisão mais alta) x
-  # disponibilidade flexível por usina (máx. geração verificada nas K semanas anteriores − inflexibilidade média,
-  # dataset termica_despacho; nuclear excluída) + subsistema, casadas por cod_usinaplanejamento. Semanas sem dado usam a
-  # mais recente (persistência da última disponibilidade observada).
+  # capacidade flexível por usina (máx. geração verificada nas K semanas anteriores − inflexibilidade média, dataset
+  # termica_despacho; nuclear excluída por definição) + subsistema, casadas por cod_usinaplanejamento. Semanas sem dado
+  # usam a mais recente. (A disponibilidade declarada do ONS foi testada e não mudou as métricas; ver README.)
   # Alternativamente, um xlsx com aba 'pilha_term' (potencia acumulada MW, cvu R$/MWh) em pilha_termica_xlsx substitui tudo.
-  pilha_fonte_capacidade: disponibilidade # disponibilidade (declarada, dataset ONS) | geracao (proxy: máx. gerado em K semanas)
-  pilha_disponibilidade_semanas: 4        # K do proxy geracao
+  pilha_capacidade_semanas: 52            # K: janela do máximo gerado (≈ 12 meses)
   pilha_min_flex_mw: 10                   # usina entra na pilha se capacidade flexível (pmax − inflexibilidade média) >= isto
   pilha_termica_xlsx: null
   # Simulação

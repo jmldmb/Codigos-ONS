@@ -18,7 +18,7 @@ import pandas as pd
 from ..config import get_logger, load_config, output_dir
 from ..dados import temperatura
 from . import feriados, pilha_termica, premissas, valor_agua
-from .despacho import despachar, despachar_va, limite_hidro, r_medio_semana
+from .despacho import despachar, despachar_va
 from .hidro_fd import parametros as params_fd
 from .preco import Precificador
 from .samplers.carga import CargaSampler
@@ -50,9 +50,6 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
     modo_va = cfg.get("termica_flexivel") == "valor_agua"
     s_term = TermicaSampler() if not modo_va else None
     va_dia = valor_agua.serie_diaria(anos, meses) if modo_va else None
-    if modo_va:
-        va_semana = pilha_termica.semana_operativa(pd.Series(va_dia.index, index=va_dia.index))
-        va_tipo = pd.Series([feriados.tipo_dia(x.date()) for x in va_dia.index], index=va_dia.index)
     pfd = params_fd()
     precos = Precificador(pilha)
     try:
@@ -64,7 +61,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
     logger.info(f"simulando {len(prem)} meses × {n_sim} cenários = {total_h:,} horas; hidro FD {pfd['origem']}; "
                 f"inflexterm = {cfg['inflexterm']}; térmica flexível = {cfg.get('termica_flexivel', 'residual')}"
                 + (f" (perfil {s_term.modo})" if s_term else f" (fonte {cfg['valor_agua_fonte']})"))
-    t0, feitas, registros, tetos = time.time(), 0, [], {}
+    t0, feitas, registros = time.time(), 0, []
 
     for r in prem.itertuples():
         ano, mes = int(r.ano), int(r.mes)
@@ -78,7 +75,6 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 carga = s_carga.gerar_dia(d, r.carga, temp_mes, temp_h)
                 eol = s_eol.gerar_dia(mes, r.eolica, rng)
                 cent, dist = s_cent.gerar_dia(mes, r.solar_centralizada), s_dist.gerar_dia(mes, r.solar_distribuida)
-                lim_sem = cfg["limite_hidro_reservatorio"]
                 if modo_va:
                     va = va_dia.loc[pd.Timestamp(d)].to_dict() if pd.Timestamp(d) in va_dia.index else {}
                     if not va or np.isnan(va.get("SE", np.nan)):
@@ -86,20 +82,6 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                     p = pilha_termica.pilha_semana(d)
                     pilha_arr = {"cvu": p["cvu"].values.astype(float), "capacidade": p["capacidade"].values.astype(float),
                                  "subsistema": p["subsistema"].values}
-                    # teto de R da semana pela modulação em torno do R médio (premissas + base térmica da semana)
-                    sem_chave = va_semana.loc[pd.Timestamp(d)]
-                    if sem_chave not in tetos:
-                        va_du = va_dia[va_semana == sem_chave]
-                        base_sem = 0.0
-                        for tipo_s, frac in (("DU", 5 / 7), ("FDS", 2 / 7)):
-                            v = va_du[va_tipo[va_du.index] == tipo_s]
-                            v = v.iloc[0].to_dict() if len(v) else va
-                            na_base = pilha_arr["cvu"] <= np.array([v.get(s_, v.get("SE", 0.0)) for s_ in pilha_arr["subsistema"]])
-                            base_sem += frac * float(pilha_arr["capacidade"][na_base].sum())
-                        r_med = r_medio_semana(r.carga, r.eolica, r.solar_centralizada + r.solar_distribuida, r.inflexterm, base_sem,
-                                               r.ena_armazenavel, mes, 5 / 7, pfd)
-                        tetos[sem_chave] = limite_hidro(r_med)
-                    lim_sem = tetos[sem_chave]
                 else:
                     base = s_term.gerar_dia(mes, tipo, float(r.termica_flex_base))
                 if np.isnan(carga).any() or np.isnan(eol).any():
@@ -107,7 +89,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 for h in range(24):
                     if modo_va:
                         res = despachar_va(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
-                                           mes, h, tipo == "DU", va, pilha_arr, pfd, lim=lim_sem)
+                                           mes, h, tipo == "DU", va, pilha_arr, pfd)
                     else:
                         res = despachar(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
                                         mes, h, tipo == "DU", pfd, termica_base=base[h])
@@ -120,7 +102,6 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                         "historico": bool(r.historico), "val_carga": carga[h], "val_gereolica": eol[h],
                         "val_gersolar_cent": cent[h], "val_gersolar_dist": dist[h], "val_gersolar": cent[h] + dist[h],
                         "val_inflexterm": r.inflexterm, "ENA_arm": r.ena_armazenavel, "temp_c": temp_h[h] if temp_h else np.nan,
-                        "limite_hidro": lim_sem if modo_va else cfg["limite_hidro_reservatorio"],
                         **res, "val_gerhidro_total": res["val_gerhidro_reservatorio"] + res["val_gerhidro_fd"],
                         "carga_liquida": cl_, "valor_agua": va.get("SE") if modo_va else np.nan,
                     })
