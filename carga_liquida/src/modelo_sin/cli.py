@@ -94,7 +94,7 @@ def cmd_tudo(args):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="carga_liquida", description=__doc__)
+    p = argparse.ArgumentParser(prog="modelo_sin", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("baixar", help="baixa/atualiza os dados do ONS (só o que falta)")

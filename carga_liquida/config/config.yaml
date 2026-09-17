@@ -1,13 +1,11 @@
-# Configuração do projeto Carga Líquida
-# Os caminhos de dados apontam para o checkout principal para sobreviverem a worktrees.
-# CARGA_LIQUIDA_DATA_DIR / CARGA_LIQUIDA_OUTPUT_DIR (variáveis de ambiente) sobrescrevem paths.*.
+# Configuração do modelo_sin. Caminhos relativos à raiz do projeto; MODELO_SIN_DATA_DIR / MODELO_SIN_OUTPUT_DIR
+# (variáveis de ambiente) sobrescrevem paths.* (útil para worktrees apontarem para os dados do checkout principal).
 paths:
-  data_dir: "C:/Users/joaom/Codigos/Codigos-ONS/carga_liquida/Data"
-  output_dir: "Output"          # relativo à raiz do projeto (carga_liquida/)
+  data_dir: "Data"
+  output_dir: "Output"
 
-# Fontes ONS (open data S3). {y}=ano, {m}=mês com 2 dígitos. `dir` é relativo a paths.data_dir
-# (os nomes preservam o layout Data/raw/... já existente no disco); `dir` absoluto reaproveita
-# pastas já baixadas por outros módulos (baterias/), sem re-baixar.
+# Fontes ONS (open data S3). {y}=ano, {m}=mês com 2 dígitos. `dir` é relativo a paths.data_dir.
+# `python run.py baixar` reconstrói tudo do zero (só baixa o que falta; os meses recentes são re-baixados).
 ons_base: "https://ons-aws-prod-opendata.s3.amazonaws.com/dataset/"
 datasets:
   geracao_usina:        # geração horária verificada por usina (todos os tipos, inclui MMGD)
@@ -27,7 +25,7 @@ datasets:
     start: "2022"
   balanco:              # balanço de energia horário por subsistema (+ linha SIN): carga, hidro, térmica, eólica, solar
     path: "balanco_energia_subsistema_ho/BALANCO_ENERGIA_SUBSISTEMA_{y}.parquet"
-    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/balanco"
+    dir: "raw/balanco"
     freq: yearly
     start: "2022"
   ena:                  # ENA diária por subsistema (bruta e armazenável, MWmed e %MLT)
@@ -42,17 +40,17 @@ datasets:
     start: "2022"
   coff_eolica:          # constrained-off eólico por conjunto, semi-horário, com razão/origem (desde 2023-10)
     path: "restricao_coff_eolica_tm/RESTRICAO_COFF_EOLICA_{y}_{m}.parquet"
-    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_eolica"
+    dir: "raw/coff_eolica"
     freq: monthly
     start: "2023-10"
   coff_fotovoltaica:    # idem solar centralizada (desde 2024-04)
     path: "restricao_coff_fotovoltaica_tm/RESTRICAO_COFF_FOTOVOLTAICA_{y}_{m}.parquet"
-    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/coff_fotovoltaica"
+    dir: "raw/coff_fotovoltaica"
     freq: monthly
     start: "2024-04"
   capacidade:           # cadastro de unidades geradoras com potência efetiva e datas de entrada/desativação (arquivo único)
     path: "capacidade-geracao/CAPACIDADE_GERACAO.parquet"
-    dir: "C:/Users/joaom/Codigos/Codigos-ONS/baterias/Data/capacidade"
+    dir: "raw/capacidade"
     freq: static
 
 download:
@@ -226,4 +224,4 @@ modelo:
 
 logging:
   level: INFO
-  file: "logs/carga_liquida.log"
+  file: "logs/modelo_sin.log"

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-# src/carga_liquida/config.py -> raiz do projeto = parents[2]
+# src/modelo_sin/config.py -> raiz do projeto = parents[2]
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "config.yaml"
 
@@ -23,7 +23,7 @@ def load_config() -> dict:
     if _config is None:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             _config = yaml.safe_load(f)
-        for env, key in (("CARGA_LIQUIDA_DATA_DIR", "data_dir"), ("CARGA_LIQUIDA_OUTPUT_DIR", "output_dir")):
+        for env, key in (("MODELO_SIN_DATA_DIR", "data_dir"), ("MODELO_SIN_OUTPUT_DIR", "output_dir")):
             if os.environ.get(env):
                 _config["paths"][key] = os.environ[env]
     return _config
@@ -73,7 +73,7 @@ def get_logger(name: str) -> logging.Logger:
     sh = logging.StreamHandler()
     sh.setFormatter(fmt)
     logger.addHandler(sh)
-    log_file = ROOT / cfg.get("file", "logs/carga_liquida.log")
+    log_file = ROOT / cfg.get("file", "logs/modelo_sin.log")
     log_file.parent.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setFormatter(fmt)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from carga_liquida.cli import main  # noqa: E402
+from modelo_sin.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     main()

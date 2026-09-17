@@ -1,0 +1,7 @@
+# dados e saídas (reconstruíveis: python run.py baixar / processar / treinar / simular)
+Data/
+Output/
+logs/
+__pycache__/
+*.pyc
+.claude/worktrees/

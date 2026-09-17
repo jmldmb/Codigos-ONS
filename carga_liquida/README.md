@@ -1,7 +1,10 @@
-# Carga Líquida do SIN
+# modelo_sin
 
-Medição e simulação da **carga líquida** do Sistema Interligado Nacional a partir dos dados abertos
-do ONS. Funde os projetos antigos `carga_liquida` (observado) e `mini_dessem` (simulador) num pacote só.
+Medição e simulação da **carga líquida** do Sistema Interligado Nacional a partir dos dados abertos do ONS —
+carga, renováveis, hidro, térmica, curtailment e preço, observados e simulados hora a hora. Base para as análises
+do SIN (baterias × curtailment × preço, ENA, etc.), que entram como módulos reaproveitando os loaders de `dados/`.
+Funde os projetos antigos `carga_liquida` (observado) e `mini_dessem` (simulador); o histórico anterior a este
+repositório está no monorepo `Codigos-ONS` (pasta `carga_liquida/`).
 
 ```
 carga_liquida = Hidro_R + termica_flexivel
@@ -18,11 +21,11 @@ validar o modelo contra o observado.
 ## Estrutura
 
 ```
-carga_liquida/
+modelo_sin/
 ├── run.py                      ponto de entrada (CLI)
 ├── config/config.yaml          caminhos, datasets ONS, período, definição da CL, parâmetros do modelo
 ├── config/projecoes.yaml       premissas mensais 2026-28 (herdadas do data.py do mini_dessem)
-├── src/carga_liquida/
+├── src/modelo_sin/
 │   ├── config.py               leitura do config, diretórios, logging
 │   ├── dados/
 │   │   ├── download.py         download incremental dos datasets ONS (S3 open data)
@@ -41,6 +44,7 @@ carga_liquida/
 │   │   ├── simulacao.py        Monte Carlo (ano × mês × cenário × dia × hora)
 │   │   └── feriados.py         feriados nacionais calculados; tipo de dia DU/FDS
 │   ├── validacao/comparar.py   observado vs simulado por componente (métricas + gráficos)
+│   ├── validacao/perfis.py     baterias de coerência dos samplers (eólica, carga, solar, hidro FD)
 │   └── cli.py
 ├── legacy/Scripts/             scripts originais do carga_liquida (notebook exportado + validações), sem manutenção
 ├── legacy/mini_dessem/         projeto mini_dessem original, sem manutenção
@@ -70,11 +74,11 @@ Como biblioteca:
 
 ```python
 import sys; sys.path.insert(0, "src")
-from carga_liquida.observado import carga_liquida as cl, analises
+from modelo_sin.observado import carga_liquida as cl, analises
 df = cl.carregar_historico()                 # din_instante, FD, R, termica_flexivel, carga_liquida_historica, ano, mes, dia, hora
 df_cmo = analises.carga_liquida_com_cmo()    # + val_cmo (média horária dos patamares semi-horários)
 
-from carga_liquida.modelo import simulacao, premissas
+from modelo_sin.modelo import simulacao, premissas
 sim = simulacao.simular(anos=[2026], num_simulacoes=20, seed=1, salvar=False)   # um registro por cenário/dia/hora
 prem = premissas.montar()                    # tabela (ano, mês): carga, eólica, solar, ENA, térmica, inflexterm
 ```
@@ -86,10 +90,10 @@ prem = premissas.montar()                    # tabela (ano, mês): carga, eólic
 | `geracao_usina` | ONS `geracao_usina_2_ho` (mensal, 2022-01+) | `Data/raw/geracao por usina/` | geração horária por usina → FD/R, tipos, MMGD |
 | `termica_despacho` | ONS `geracao_termica_despacho_2_ho` (mensal) | `Data/raw/termoeletrica/` | componentes verificadas do despacho térmico |
 | `cmo` | ONS `cmo_tm` (anual) | `Data/raw/CMO/` | CMO semi-horário (Sudeste por padrão) |
-| `balanco` | ONS `balanco_energia_subsistema_ho` (anual) | `baterias/Data/balanco` (reaproveitado) | carga, térmica total, eólica, solar do SIN |
+| `balanco` | ONS `balanco_energia_subsistema_ho` (anual) | `Data/raw/balanco/` | carga, térmica total, eólica, solar do SIN |
 | `ena` | ONS `ena_subsistema_di` (anual) | `Data/raw/ENA/` | ENA armazenável diária (soma SIN) |
-| `coff_eolica`, `coff_fotovoltaica` | ONS `restricao_coff_*_tm` (mensal) | `baterias/Data/coff_*` (reaproveitado) | curtailment (energético ENE × rede CNF/REL) e potencial renovável. Sem restrição = `''` até 2024-12 e `NaN` desde 2025-01 |
-| `capacidade` | ONS `capacidade-geracao` (arquivo único) | `baterias/Data/capacidade` (reaproveitado) | capacidade instalada eólica por mês (teto horário do sampler) |
+| `coff_eolica`, `coff_fotovoltaica` | ONS `restricao_coff_*_tm` (mensal) | `Data/raw/coff_*/` | curtailment (energético ENE × rede CNF/REL) e potencial renovável. Sem restrição = `''` até 2024-12 e `NaN` desde 2025-01 |
+| `capacidade` | ONS `capacidade-geracao` (arquivo único) | `Data/raw/capacidade` | capacidade instalada eólica por mês (teto horário do sampler) |
 | `temperatura` | Meteostat bulk (NOAA ISD/SYNOP), 15 aeroportos | `Data/raw/temperatura/` | perfil horário da carga (sampler v6) |
 | `cvu` | ONS `cvu_usitermica_se` (anual) | `Data/raw/CVU/` | CVU semanal por usina → pilha térmica |
 
