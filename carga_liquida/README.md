@@ -176,7 +176,15 @@ Histórico das últimas mudanças (mesma janela, mesma semente quando pareado):
 6. Fator diário solar + choque comum com a eólica: correlação diária sim 0,25 (obs 0,29) na centralizada, 0,09 (0,07) na
    distribuída; std de D 0,115 (obs 0,097) / 0,067 (0,083); ENE 1.207 → 1.235; carga líquida MAE 2.635 → 2.608 (R² 0,763).
    Fica fora o resíduo intradiário de nuvens (std 0,14 / 0,07 nas horas de sol) e a autocorrelação de D da centralizada
-   sai baixa (0,37 vs 0,56: ρ estimado dentro do mês do calendário). Efeito
+   sai baixa (0,37 vs 0,56: ρ estimado dentro do mês do calendário).
+7. Hidro FD (bateria `validar --perfis`): MAE 1,78 GW, R² 0,91, mas erro diário com autocorrelação 0,7 (1 d) / 0,4 (7 d) e
+   viés por ano de +0,9 (2023) a −0,5 GW (2025). **Testado e descartado:** ENA por subsistema (N 0,30, NE 0,07, S 0,11,
+   SE 0,04 MW/MWmed) em vez do SIN — MAE 1.766 → 1.718 in-sample, 2.228 → 2.277 fora da amostra (treino 2022-24,
+   teste 2025-26), viés por ano igual; EAR por subsistema: correlação com o resíduo ≤ 0,19. O erro é de **despacho**, não de
+   hidrologia: com hidro R no mínimo o modelo dá FD +1,0 GW acima da observada (ENE > 1 GW: +0,8; CMO < 10: +0,4) — o ONS
+   também reduz a fio d'água na sobra (vertimento turbinável); com R > 35 GW ou CMO > 200 fica −0,4/−0,7 GW — na escassez
+   o ONS a espreme; FD > 33 GW fica −1,5 GW. A regressão dá a FD média para (R, ENA); a FD real participa do despacho numa
+   faixa em torno dela. Não implementado (mudança estrutural no despacho; decisão pendente). Efeito
    colateral esperado: nas premissas placeholder de 2027-28 (carga 97 GW em fevereiro) aparecem ~80 horas/ano de déficit
    (dia quente + vento fraco, 18–21h: térmica toda despachada, PLD no CVU máximo) — `val_erro = 1` nessas horas.
 

@@ -15,6 +15,10 @@ Solar: centralizada (potencial COFF) e distribuída (MMGD) vs último cenário: 
 pico), nível diário, forma condicional ao nível, rampas, correlação com a eólica, limites. Foi isto que mostrou que o
 expoente 1,5 do legado dava pico +10 % e dia 1 h mais curto, e que descartar os zeros noturnos no treino (`mw > 0`)
 deixava um artefato do ONS (2024-11-10) virar 1,0 de geração noturna no perfil de novembro.
+Hidro FD: resíduo da regressão (sim − obs) por ano, persistência diária, nível de FD e ESTADO do sistema (hidro no mínimo,
+corte energético, CMO). Mostrou que o erro não é hidrologia (ENA por subsistema em vez do SIN: MAE 1.766 → 1.718 in-sample
+e 2.228 → 2.277 fora da amostra; viés por ano igual), e sim despacho: em sobra o ONS reduz a FD (~1 GW abaixo da
+regressão), em escassez a espreme (+0,4–0,7 GW); FD > 33 GW fica 1,5 GW abaixo.
 """
 import calendar
 
@@ -222,4 +226,36 @@ def testar_solar(inicio: str = "2024-04-01") -> pd.DataFrame:
     out = pd.DataFrame(linhas).groupby(["fonte", "teste", "estatistica"], sort=False).agg(obs=("obs", "max"), sim=("sim", "max")).reset_index()
     for r in out.itertuples():
         logger.info(f"  {r.fonte:<13} {r.teste:<38} {r.estatistica:<44} obs {r.obs:10.3f}   sim {r.sim:10.3f}")
+    return out
+
+
+def testar_hidro_fd(inicio: str = "2022-01-01") -> pd.DataFrame:
+    """Resíduo da regressão hidro FD na última simulação (média dos cenários − observado), por estado do sistema."""
+    from . import comparar
+    df = comparar.montar_comparacao()
+    df = df[df["din_instante"] >= inicio].copy()
+    df["ano"], df["dia"] = df["din_instante"].dt.year, df["din_instante"].dt.normalize()
+    e = df["erro_hidro_fd"]
+    linhas = []
+
+    def add(teste, nome, v, n=np.nan):
+        linhas.append({"teste": teste, "estatistica": nome, "valor": v, "n": n})
+
+    add("1 global", "MAE", e.abs().mean(), len(e)); add("1 global", "viés", e.mean(), len(e))
+    for a, v in e.groupby(df["ano"]).mean().items():
+        add("2 viés por ano", str(a), v, int((df["ano"] == a).sum()))
+    d = e.groupby(df["dia"]).mean().dropna()
+    for k in (1, 7, 30):
+        add("3 persistência do erro diário", f"autocorr {k} d", d.autocorr(k))
+    add("3 persistência do erro diário", "std", d.std())
+    for terc, v in e.groupby(pd.qcut(df["FD"], 3, labels=["baixo", "médio", "alto"]), observed=True).mean().items():
+        add("4 viés por tercil de FD observada", terc, v)
+    condicoes = [("R obs < 15 GW (hidro no mínimo)", df["R"] < 15000), ("R obs > 35 GW", df["R"] > 35000),
+                 ("ENE obs > 1 GW", df["curtailment_ene_obs"] > 1000), ("ENE obs = 0", df["curtailment_ene_obs"] == 0),
+                 ("CMO obs < 10", df["cmo_obs"] < 10), ("CMO obs > 200", df["cmo_obs"] > 200), ("FD obs > 33 GW", df["FD"] > 33000)]
+    for nome, m in condicoes:
+        add("5 viés por estado do sistema", nome, e[m].mean(), int(m.sum()))
+    out = pd.DataFrame(linhas)
+    for r in out.itertuples():
+        logger.info(f"  {r.teste:<34} {r.estatistica:<32} {r.valor:9.3f}" + (f"   n={int(r.n)}" if pd.notna(r.n) else ""))
     return out
