@@ -190,7 +190,10 @@ modelo:
   # Teto físico da eólica horária = capacidade instalada (cadastro ONS no histórico; eolica_capacidade_mw em projecoes.yaml).
   # Só corta a cauda (0,01 % das horas): o máximo agregado observado fica em ~0,87 da instalada por diversidade espacial.
   eolica_teto_capacidade: true
-  solar_fator_diario: false               # std de D 0,06–0,16 (cent.), 0,06–0,09 (dist.): segunda ordem; ligar só com o eólico
+  solar_fator_diario: true                # nível diário da solar (std de D 0,10 cent. / 0,08 dist.; multiplicativo, cópula empírica)
+  # Choque comum solar-eólica: inovações dos dois fatores diários correlacionadas pela correlação de postos observada por
+  # mês (cent. +0,5–0,6 em fev–abr, ~0 em mai–set; dist. ~+0,1): causa comum sinótica (ZCIT). Muda a cauda, não a média.
+  solar_choque_eolica: true
   solar_centralizada_shape: 1.0
   solar_distribuida_shape: 1.0
   solar_share_centralizada_default: 0.36  # meses sem dado de MMGD (2022): fração centralizada do total

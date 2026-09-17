@@ -7,6 +7,9 @@ distribuída, contra 0,13–0,40 na eólica. Sem ruído intradiário.
     distribuída : geração 'FOTOVOLTAICA - MMGD' do dataset de geração por usina (>= 2023)
 
 Um expoente de forma (config.modelo.solar_*_shape) acentua o pico: p_h ∝ p_h^k, renormalizado.
+Choque comum com a eólica (`solar_choque_eolica`): as inovações do fator diário são correlacionadas com as da eólica
+pela correlação de postos observada por mês (`corr_eolica`; centralizada +0,5–0,6 em fev–abr, ~0 em mai–set) — causa
+comum sinótica (ZCIT), não causalidade. Muda a cauda (dias de sol E vento), não a média.
 """
 import numpy as np
 import pandas as pd
@@ -60,11 +63,20 @@ def treinar() -> dict:
         df = janela_treino(serie())
         perfis = perfil_proporcional_por_mes(df, "mw")
         din = _diario.estimar(df, "mw", perfis)
-        perfis = interpolar_meses_faltantes({m: {**p, **din.get(m, {})} for m, p in perfis.items()})
-        for k in ("rho_d", "std_d"):
+        try:                                                 # choque comum: correlação de postos diária com a eólica, por mês
+            eol = janela_treino(ons.carregar_coff_horario("eolica"))
+            # centralizada (NE, 2022+): por mês — o sinal é sazonal (ZCIT); distribuída (país inteiro, 2023+): a estimativa
+            # mensal com ~90 dias é ruído (−0,3 a +0,6 entre meses vizinhos) -> agregada de todos os meses (~+0,1)
+            corr = _diario.correlacao_mensal(_diario.escores_diarios(df, "mw"), _diario.escores_diarios(eol, "potencial_mw"),
+                                             por_mes=(nome == "solar_centralizada"))
+        except FileNotFoundError:
+            corr = {}
+        perfis = interpolar_meses_faltantes({m: {**p, **din.get(m, {}), "corr_eolica": corr.get(m, 0.0)} for m, p in perfis.items()})
+        for k in ("rho_d", "std_d", "corr_eolica"):
             media = float(np.mean([v[k] for v in perfis.values() if k in v]))
             for m in perfis:
                 perfis[m].setdefault(k, media)
+        logger.info(f"  {nome}: correlação diária com a eólica por mês: " + " ".join(f"{m}:{perfis[m]['corr_eolica']:+.2f}" for m in range(1, 13)))
         for m in perfis:
             perfis[m].setdefault("quantis_d", next(v["quantis_d"] for v in perfis.values() if "quantis_d" in v))
         for mes, p in sorted(perfis.items()):
@@ -82,7 +94,8 @@ class SolarSampler:
         cfg = load_config()["modelo"]
         self.tipo = tipo
         self.shape = cfg[f"solar_{tipo}_shape"]
-        self.fator_diario = cfg.get("solar_fator_diario", False)
+        self.fator_diario = cfg.get("solar_fator_diario", True)
+        self.choque_eolica = cfg.get("solar_choque_eolica", True)
         p = params or carregar_json(f"solar_{tipo}")["meses"]
         self.p = {int(k): v for k, v in p.items()}
         if self.fator_diario and "quantis_d" not in next(iter(self.p.values())):
@@ -99,8 +112,16 @@ class SolarSampler:
         """24 valores (MW) com média = mw_medios (determinístico)."""
         return self.perfil(mes) * mw_medios * 24
 
-    def gerar_mes(self, mes: int, mw_medios: float, n_dias: int, rng: np.random.Generator | None = None) -> np.ndarray:
-        """Matriz (n_dias, 24) em MW com média do mês = mw_medios; fator diário só se `solar_fator_diario`."""
+    def gerar_mes(self, mes: int, mw_medios: float, n_dias: int, rng: np.random.Generator | None = None,
+                  eps_eolica: np.ndarray | None = None, rho_eolica: float | None = None) -> np.ndarray:
+        """Matriz (n_dias, 24) em MW com média do mês = mw_medios; fator diário só se `solar_fator_diario`.
+        `eps_eolica`/`rho_eolica`: inovações e coeficiente AR(1) do fator diário eólico do mesmo mês (choque comum)."""
         if not self.fator_diario:
             return np.tile(self.gerar_dia(mes, mw_medios), (n_dias, 1))
-        return _diario.gerar_mes(self.perfil(mes), self.p[mes], mw_medios, n_dias, rng or np.random.default_rng(), ruido=False, aditivo=False)
+        rng = rng or np.random.default_rng()
+        p = self.p[mes]
+        eps = None
+        if self.choque_eolica and eps_eolica is not None and rho_eolica is not None:
+            r = _diario.corr_inovacoes(p.get("corr_eolica", 0.0), rho_eolica, p["rho_d"])
+            eps = _diario.inovacoes(n_dias + 2, rng, eps_eolica, r)
+        return _diario.gerar_mes(self.perfil(mes), p, mw_medios, n_dias, rng, ruido=False, aditivo=False, eps=eps)

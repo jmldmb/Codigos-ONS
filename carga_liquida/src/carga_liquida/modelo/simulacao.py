@@ -83,8 +83,9 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 carga_mes = s_carga.gerar_dias(dias, r.carga, temp_mes, temps)
             else:
                 temps = temps_reais
-            eol_mes = s_eol.gerar_mes(mes, r.eolica, n_dias, rng, teto=float(r.eolica_capacidade))
-            cent_mes, dist_mes = s_cent.gerar_mes(mes, r.solar_centralizada, n_dias, rng), s_dist.gerar_mes(mes, r.solar_distribuida, n_dias, rng)
+            eol_mes, eps_w = s_eol.gerar_mes(mes, r.eolica, n_dias, rng, teto=float(r.eolica_capacidade), retornar_eps=True)
+            cent_mes = s_cent.gerar_mes(mes, r.solar_centralizada, n_dias, rng, eps_eolica=eps_w, rho_eolica=s_eol.rho(mes))
+            dist_mes = s_dist.gerar_mes(mes, r.solar_distribuida, n_dias, rng, eps_eolica=eps_w, rho_eolica=s_eol.rho(mes))
             for dia in range(1, n_dias + 1):
                 d = date(ano, mes, dia)
                 tipo = feriados.tipo_dia(d)

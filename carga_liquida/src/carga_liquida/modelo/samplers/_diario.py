@@ -13,6 +13,9 @@ aditivo tem std constante (0,12–0,16) enquanto o multiplicativo vai de 0,24 (d
 linear de ±3 h na meia-noite (o salto observado 0h vs 23h é igual ao de qualquer hora; interpolar entre meios-dias
 encolhia a variância de D). D = média do dia / média do
 mês, estimado da série diária por mês; a marginal é a empírica (quantis) porque D é limitado pela capacidade instalada.
+Choque comum: as inovações ε de dois samplers (eólica e solar) podem ser correlacionadas — causa comum sinótica (ZCIT ativa =
+nuvens + alísio fraco; recuada = sol + vento): corr de postos do nível diário +0,5–0,6 em fev–abr, ~0 em mai–set. A
+correlação alvo ρ_ws entre os u é convertida na correlação r das inovações por r = ρ_ws · (1 − ρ_w ρ_s) / √((1−ρ_w²)(1−ρ_s²)).
 A média dos dias do MÊS é renormalizada à premissa (antes cada dia era renormalizado: todo dia simulado tinha
 exatamente a média do mês — a eólica observada tem P10/P90 de D em 0,5/1,5 no verão).
 """
@@ -30,6 +33,26 @@ def _ar1(x: np.ndarray) -> tuple[float, float]:
         return 0.0, float(np.std(x)) if len(x) else 0.0
     phi = float(np.clip(np.corrcoef(x[:-1], x[1:])[0, 1], -0.99, 0.99))
     return phi, float(np.std(x[1:] - phi * x[:-1]))
+
+
+def escores_diarios(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    """Por dia: mês e escore normal (posto dentro do mês do calendário) de D = média do dia / média do mês."""
+    d = df.dropna(subset=[col]).copy()
+    d["ym"], d["dia"] = d["din_instante"].dt.to_period("M"), d["din_instante"].dt.normalize()
+    diario = d.groupby(["ym", "dia"])[col].mean().reset_index()
+    diario["D"] = diario[col] / diario.groupby("ym")[col].transform("mean")
+    diario["mes"] = diario["dia"].dt.month
+    diario["u"] = diario.groupby("mes")["D"].transform(lambda s: norm.ppf((s.rank().values - 0.5) / len(s)))
+    return diario[["dia", "mes", "D", "u"]]
+
+
+def correlacao_mensal(a: pd.DataFrame, b: pd.DataFrame, por_mes: bool = True) -> dict[int, float]:
+    """Correlação dos escores normais diários de dois samplers (mesmo dia): por mês, ou a agregada de todos os meses
+    repetida (`por_mes=False`, para séries curtas em que a estimativa mensal é ruído)."""
+    j = a.merge(b, on="dia", suffixes=("_a", "_b"))
+    if not por_mes:
+        return {m: float(j["u_a"].corr(j["u_b"])) for m in range(1, 13)}
+    return {int(m): float(g["u_a"].corr(g["u_b"])) for m, g in j.groupby("mes_a") if len(g) >= 20}
 
 
 def estimar(df: pd.DataFrame, col: str, perfis: dict) -> dict:
@@ -58,19 +81,38 @@ def estimar(df: pd.DataFrame, col: str, perfis: dict) -> dict:
     return out
 
 
+def inovacoes(n: int, rng: np.random.Generator, base: np.ndarray | None = None, corr: float = 0.0) -> np.ndarray:
+    """n inovações N(0,1); com `base` (inovações de outro sampler) e `corr`, ε = corr·base + √(1−corr²)·η."""
+    eta = rng.normal(size=n)
+    if base is None or corr == 0.0:
+        return eta
+    c = float(np.clip(corr, -0.999, 0.999))
+    return c * base[:n] + np.sqrt(1 - c ** 2) * eta
+
+
+def corr_inovacoes(rho_alvo: float, rho_base: float, rho: float) -> float:
+    """Correlação das inovações que produz correlação `rho_alvo` entre dois AR(1) estacionários de coeficientes rho_base e rho."""
+    f = np.sqrt((1 - rho_base ** 2) * (1 - rho ** 2)) / (1 - rho_base * rho)
+    return float(np.clip(rho_alvo / f, -0.999, 0.999)) if f > 0 else 0.0
+
+
 def gerar_mes(perfil_prop: np.ndarray, p: dict, mw_medios: float, n_dias: int, rng: np.random.Generator,
-              fator_diario: bool = True, ruido: bool = True, aditivo: bool = True, teto: float | None = None) -> np.ndarray:
+              fator_diario: bool = True, ruido: bool = True, aditivo: bool = True, teto: float | None = None,
+              eps: np.ndarray | None = None, retornar_eps: bool = False):
     """Matriz (n_dias, 24) em MW com média do mês = mw_medios. `aditivo=False` (solar): Y = M · p_h · D — nebulosidade
     escala o dia inteiro, e um deslocamento aditivo criaria geração à noite. `teto` (MW): limite físico horário
-    (capacidade instalada); o corte é redistribuído pela renormalização do mês."""
+    (capacidade instalada); o corte é redistribuído pela renormalização do mês. `eps`: inovações N(0,1) do fator diário
+    (n_dias + 2), para choque comum com outro sampler; `retornar_eps` devolve (y, eps)."""
     perfil = np.asarray(perfil_prop) * 24                                       # média 1
     nivel = np.zeros((n_dias, 24))
+    if eps is None:
+        eps = rng.normal(size=n_dias + 2)
     if fator_diario and p.get("quantis_d"):
         rho = p["rho_d"]
         u = np.empty(n_dias + 2)                                                # um dia extra em cada ponta para interpolar
-        u[0] = rng.normal()
+        u[0] = eps[0]
         for t in range(1, n_dias + 2):
-            u[t] = rho * u[t - 1] + rng.normal(0, np.sqrt(1 - rho ** 2))
+            u[t] = rho * u[t - 1] + np.sqrt(1 - rho ** 2) * eps[t]
         D = np.interp(norm.cdf(u), GRADE, p["quantis_d"])
         # nível constante no dia (preserva a distribuição de D), com transição linear de ±TRANSICAO h em torno da meia-noite
         horas = np.arange(n_dias * 24)
@@ -88,10 +130,11 @@ def gerar_mes(perfil_prop: np.ndarray, p: dict, mw_medios: float, n_dias: int, r
     Z = (Z - np.convolve(np.pad(Z, 12, mode="reflect"), np.ones(24) / 24, mode="valid")[:len(Z)]).reshape(n_dias, 24)
     y = np.maximum(mw_medios * ((perfil[None, :] + nivel + Z) if aditivo else perfil[None, :] * (1 + nivel) * (1 + Z)), 0.0)
     if y.mean() <= 0:
-        return np.tile(perfil * mw_medios, (n_dias, 1))
-    y *= mw_medios / y.mean()
-    if teto is not None and np.isfinite(teto) and teto > 0 and y.max() > teto:
-        for _ in range(3):                                   # cortar no teto e recompor a média do mês (converge em 2-3 passos)
-            y = np.minimum(y, teto)
-            y *= min(mw_medios / y.mean(), teto / max(y.max(), 1e-9))
-    return y
+        y = np.tile(perfil * mw_medios, (n_dias, 1))
+    else:
+        y *= mw_medios / y.mean()
+        if teto is not None and np.isfinite(teto) and teto > 0 and y.max() > teto:
+            for _ in range(3):                               # cortar no teto e recompor a média do mês (converge em 2-3 passos)
+                y = np.minimum(y, teto)
+                y *= min(mw_medios / y.mean(), teto / max(y.max(), 1e-9))
+    return (y, eps) if retornar_eps else y

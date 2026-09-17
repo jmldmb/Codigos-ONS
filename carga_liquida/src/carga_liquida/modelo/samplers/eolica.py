@@ -50,11 +50,15 @@ class EolicaSampler:
         self.fator_diario = cfg.get("eolica_fator_diario", True) if fator_diario is None else fator_diario
 
     def gerar_mes(self, mes: int, mw_medios: float, n_dias: int, rng: np.random.Generator | None = None,
-                  teto: float | None = None) -> np.ndarray:
-        """Matriz (n_dias, 24) em MW com média do mês = mw_medios; `teto` = capacidade instalada (MW), opcional."""
+                  teto: float | None = None, retornar_eps: bool = False):
+        """Matriz (n_dias, 24) em MW com média do mês = mw_medios; `teto` = capacidade instalada (MW), opcional.
+        `retornar_eps=True` devolve (y, eps) — as inovações do fator diário, para o choque comum com a solar."""
         p = self.p[mes]
         return _diario.gerar_mes(p["perfil_proporcional"], p, mw_medios, n_dias, rng or np.random.default_rng(),
-                                 fator_diario=self.fator_diario, teto=teto)
+                                 fator_diario=self.fator_diario, teto=teto, retornar_eps=retornar_eps)
+
+    def rho(self, mes: int) -> float:
+        return float(self.p[mes]["rho_d"])
 
     def gerar_dia(self, mes: int, mw_medios: float, rng: np.random.Generator | None = None,
                   deterministico: bool = False) -> np.ndarray:

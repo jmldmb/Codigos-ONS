@@ -184,7 +184,8 @@ def testar_solar(inicio: str = "2024-04-01") -> pd.DataFrame:
         d["D"], d["f"] = d["dm"] / d["mm"], d["y"] / d["dm"].replace(0, np.nan)
         return d
 
-    Dw = prep(w).groupby("dia")["D"].first().rename("Dw")
+    Dw = {"obs": prep(w).groupby("dia")["D"].first().rename("Dw"),                      # eólica observada para a solar observada
+          "sim": prep(sim[["din_instante", "val_gereolica"]].rename(columns={"val_gereolica": "y"})).groupby("dia")["D"].first().rename("Dw")}
     linhas = []
 
     def add(fonte, teste, nome, lab, v):
@@ -214,7 +215,7 @@ def testar_solar(inicio: str = "2024-04-01") -> pd.DataFrame:
             pm = d.groupby(["mes", "hora"])["f"].transform("mean")
             z = (d["f"] - pm)[d["hora"].between(7, 16)]
             add(fonte, "5 resíduo intradiário (horas de sol)", "std", lab, z.std())
-            j = D.reset_index().merge(Dw.reset_index(), on="dia")
+            j = D.reset_index().merge(Dw[lab].reset_index(), on="dia")                # sim x sim: mesmo cenário
             add(fonte, "6 correlação do nível com a eólica", "corr", lab, j["D"].corr(j["Dw"]) if j["D"].std() > 1e-9 else 0.0)
             add(fonte, "7 limites", "máx MW", lab, d["y"].max())
             add(fonte, "7 limites", "% horas noturnas > 1 MW", lab, 100 * (d[d["hora"].isin([22, 23, 0, 1, 2, 3, 4])]["y"] > 1).mean())
