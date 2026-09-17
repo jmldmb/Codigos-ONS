@@ -24,6 +24,7 @@ from .preco import Precificador
 from .samplers.carga import CargaSampler
 from .samplers.eolica import EolicaSampler
 from .samplers.solar import SolarSampler
+from .samplers.termica import TermicaSampler
 
 logger = get_logger("simulacao")
 SAIDA = "modelo"
@@ -46,6 +47,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
     prem = prem.dropna(subset=["carga", "eolica", "solar_centralizada", "solar_distribuida", "ena_armazenavel", "inflexterm"])
     s_carga, s_eol = CargaSampler(), EolicaSampler()
     s_cent, s_dist = SolarSampler("centralizada"), SolarSampler("distribuida")
+    s_term = TermicaSampler()
     pfd = params_fd()
     precos = Precificador(pilha)
     try:
@@ -55,7 +57,8 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
 
     total_h = int(sum(n_sim * calendar.monthrange(int(r.ano), int(r.mes))[1] * 24 for r in prem.itertuples()))
     logger.info(f"simulando {len(prem)} meses × {n_sim} cenários = {total_h:,} horas; hidro FD {pfd['origem']}; "
-                f"inflexterm = {cfg['inflexterm']}")
+                f"inflexterm = {cfg['inflexterm']}; térmica flexível = {cfg.get('termica_flexivel', 'residual')} "
+                f"(perfil {s_term.modo})")
     t0, feitas, registros = time.time(), 0, []
 
     for r in prem.itertuples():
@@ -70,13 +73,15 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                 carga = s_carga.gerar_dia(d, r.carga, temp_mes, temp_h)
                 eol = s_eol.gerar_dia(mes, r.eolica, rng)
                 cent, dist = s_cent.gerar_dia(mes, r.solar_centralizada), s_dist.gerar_dia(mes, r.solar_distribuida)
+                base = s_term.gerar_dia(mes, tipo, float(r.termica_flex_base))
                 if np.isnan(carga).any() or np.isnan(eol).any():
                     continue
                 for h in range(24):
                     res = despachar(carga[h], eol[h], cent[h], dist[h], r.inflexterm, r.ena_armazenavel,
-                                    mes, h, tipo == "DU", pfd)
+                                    mes, h, tipo == "DU", pfd, termica_base=base[h])
                     if res is None:
                         continue
+                    # carga líquida = R + térmica flexível (base + extra) = carga − renováveis pós − inflexível − FD
                     cl_ = carga[h] - res["val_gereolica_depois_corte"] - res["val_gersolar_depois_corte"] - r.inflexterm - res["val_gerhidro_fd"]
                     registros.append({
                         "ano": ano, "mes": mes, "dia": dia, "hora": h, "simulacao": sim, "tipo_dia": tipo,

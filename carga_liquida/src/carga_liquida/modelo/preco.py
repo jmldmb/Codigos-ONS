@@ -1,7 +1,8 @@
 """PLD pela pilha térmica (merit order), porte de mini_dessem/pricing.py.
 
-    PLD = CVU da primeira usina da pilha cuja potência acumulada >= térmica_flex + inflexterm_adicional
-          (se térmica_flex > 200 MW); senão CVU no ponto do adicional, com piso pld_minimo.
+    PLD = CVU da primeira usina da pilha cuja potência acumulada >= térmica_flex + pld_offset_mw
+          (se térmica_flex > 200 MW); senão CVU no ponto do offset, com piso pld_minimo.
+    térmica_flex = base (premissa) + extra (saturação hidráulica). O legado usava offset = 3.500 MW.
 
 A pilha de cada mês vem de modelo/pilha_termica.py (CVU semanal x capacidade, dados ONS). Um xlsx com
 aba 'pilha_term' (config.modelo.pilha_termica_xlsx) substitui todas; sem nenhum dos dois, pilha de exemplo.
@@ -43,7 +44,7 @@ class Precificador:
     def __init__(self, pilha: pd.DataFrame | None = None):
         cfg = load_config()["modelo"]
         self.pld_min = cfg["pld_minimo"]
-        self.adicional = cfg["inflexterm_adicional_mw"]
+        self.adicional = cfg.get("pld_offset_mw", 0)
         self.fixa = pilha if pilha is not None else carregar_pilha_xlsx()
         if self.fixa is None:
             try:

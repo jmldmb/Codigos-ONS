@@ -20,11 +20,14 @@ def _cfg():
 
 
 def despachar(carga: float, eolica: float, solar_cent: float, solar_dist: float, inflexterm: float, ena: float,
-              mes: int, hora: int, is_weekday: bool, params_fd: dict | None = None) -> dict | None:
+              mes: int, hora: int, is_weekday: bool, params_fd: dict | None = None, termica_base: float = 0.0) -> dict | None:
+    """`termica_base` = térmica flexível decidida por fins energéticos (premissa); entra no balanço como dada,
+    junto com a inflexível. A térmica "extra" só aparece quando a hidro R satura."""
     cfg = _cfg()
     lim, mn = cfg["limite_hidro_reservatorio"], cfg["min_hidro_reservatorio"]
     fd = lambda r: calcular_fd(mes, hora, is_weekday, r, ena, params_fd)  # noqa: E731
     solar = solar_cent + solar_dist
+    inflexterm = inflexterm + termica_base
 
     R = lim
     excesso = eolica + solar + inflexterm + fd(R) + R - carga
@@ -51,12 +54,13 @@ def despachar(carga: float, eolica: float, solar_cent: float, solar_dist: float,
     if deficit > 0:
         R += min(deficit, lim - R)
         deficit = carga - (eol_pos + cent_pos + dist_pos + inflexterm + fd(R) + R)
-    termica_flex = max(deficit, 0.0)
+    termica_extra = max(deficit, 0.0)
     FD = fd(R)
-    if min(termica_flex, R, FD, eol_pos, cent_pos, dist_pos) < 0:
+    if min(termica_extra, R, FD, eol_pos, cent_pos, dist_pos) < 0:
         return None
-    balanco = eol_pos + cent_pos + dist_pos + inflexterm + FD + R + termica_flex
-    return {"val_term_despacho": termica_flex, "val_gerhidro_reservatorio": R, "val_gerhidro_fd": FD,
+    balanco = eol_pos + cent_pos + dist_pos + inflexterm + FD + R + termica_extra
+    return {"val_term_despacho": termica_base + termica_extra, "val_term_base": termica_base, "val_term_extra": termica_extra,
+            "val_gerhidro_reservatorio": R, "val_gerhidro_fd": FD,
             "curtailment": corte_eol + corte_cent + corte_dist, "curtailment_eolica": corte_eol,
             "curtailment_solar_cent": corte_cent, "curtailment_solar_dist": corte_dist,
             "val_gereolica_depois_corte": eol_pos, "val_gersolar_cent_depois_corte": cent_pos,

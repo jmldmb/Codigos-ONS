@@ -141,6 +141,12 @@ modelo:
   #   termica_total   -> geração térmica total observada/projetada (premissa do legado: val_inflexterm = val_gertermica)
   #   termica_forcada -> térmica total - térmica flexível observada (só o que é de fato forçado)
   inflexterm: termica_forcada
+  # Térmica flexível "base" (decisão energética do operador) como PREMISSA mensal exógena:
+  #   exogena  -> histórico: média mensal observada; projeções: projecoes.yaml (termica_flexivel_mwmed).
+  #               O despacho só adiciona térmica "extra" quando a hidro R satura (degrau de preço).
+  #   residual -> legado: nenhuma térmica base; térmica só quando R bate no limite.
+  termica_flexivel: exogena
+  termica_flexivel_perfil: observado      # modulação horária da base: flat | observado (treinar termica)
   # A carga do balanço não inclui a exportação (val_intercambio da linha SIN), mas a geração observada sim;
   # somar fecha a identidade geração = carga + exportação (~0,2-1 GW) e alinha a carga líquida simulada à observada.
   carga_inclui_intercambio: true
@@ -164,11 +170,13 @@ modelo:
   solar_share_centralizada_default: 0.36  # meses sem dado de MMGD (2022): fração centralizada do total
   # Preço
   pld_minimo: 61
+  pld_offset_mw: 0                        # legado somava 3.500 MW ao despacho antes de ler a pilha (compensava a base ausente)
   # Pilha térmica (merit order) mensal montada dos dados: CVU da última semana do mês (dataset cvu) x
   # capacidade disponível por usina (máximo da geração verificada nos últimos N meses, dataset termica_despacho),
   # casadas por cod_usinaplanejamento. Meses sem dado usam a pilha mais recente. Alternativamente, um xlsx
   # com aba 'pilha_term' (potencia acumulada MW, cvu R$/MWh) em pilha_termica_xlsx substitui tudo.
   pilha_capacidade_meses: 12
+  pilha_min_flex_mw: 10                   # usina entra na pilha se capacidade flexível (pmax − inflexibilidade média) >= isto
   pilha_termica_xlsx: null
   # Simulação
   num_simulacoes: 6                       # cenários (meses completos) por mês/ano

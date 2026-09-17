@@ -89,14 +89,15 @@ def projecoes() -> pd.DataFrame:
         proj = yaml.safe_load(f)
     chave = {"carga_mwmed": "carga", "eolica_mwmed": "eolica", "solar_centralizada_mwmed": "solar_centralizada",
              "solar_distribuida_mwmed": "solar_distribuida", "ena_armazenavel_mwmed": "ena_armazenavel",
-             "termica_total_mwmed": "termica_total"}
+             "termica_total_mwmed": "termica_total", "termica_flexivel_mwmed": "termica_flexivel"}
     rows = {}
     for k, col in chave.items():
         for ano, meses in (proj.get(k) or {}).items():
             for mes, v in meses.items():
                 rows.setdefault((int(ano), int(mes)), {})[col] = float(v)
     df = pd.DataFrame([{"ano": a, "mes": m, **v} for (a, m), v in sorted(rows.items())])
-    df["termica_flexivel"] = float("nan")
+    if "termica_flexivel" not in df.columns:
+        df["termica_flexivel"] = float("nan")
     df["historico"] = False
     return df[["ano", "mes", *COLS, "historico"]]
 
@@ -114,6 +115,15 @@ def montar(anos=None, meses=None) -> pd.DataFrame:
         df["inflexterm"] = df["termica_total"]
     proj = ~df["historico"] & df["mes"].isin(cfg["inflexterm_adicional_meses"])
     df.loc[proj, "inflexterm"] += cfg["inflexterm_adicional_mw"]
+    # térmica flexível base (premissa exógena): observada no histórico, yaml nas projeções; 0 no modo residual
+    if cfg.get("termica_flexivel", "residual") == "exogena":
+        sem = ~df["historico"] & df["termica_flexivel"].isna()
+        if sem.any():
+            logger.warning(f"Projeções sem termica_flexivel_mwmed em projecoes.yaml (base = 0): "
+                           f"{[(int(a), int(m)) for a, m in zip(df.loc[sem, 'ano'], df.loc[sem, 'mes'])]}")
+        df["termica_flex_base"] = df["termica_flexivel"].fillna(0.0)
+    else:
+        df["termica_flex_base"] = 0.0
     if anos is not None:
         df = df[df["ano"].isin(list(anos))]
     if meses is not None:
