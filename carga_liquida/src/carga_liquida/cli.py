@@ -6,7 +6,7 @@ from .config import get_logger, load_config, output_dir
 logger = get_logger("cli")
 
 ANALISES = ("hidro", "cmo", "diarios", "curtailment")
-TREINOS = ("eolica", "solar", "carga", "termica", "curtailment_rede", "hidro_fd", "pilha")
+TREINOS = ("eolica", "solar", "carga", "temperatura", "termica", "curtailment_rede", "hidro_fd", "pilha")
 
 
 def _validar(valores, validos, rotulo):
@@ -40,10 +40,10 @@ def cmd_processar(args):
 
 def cmd_treinar(args):
     from .modelo import hidro_fd, pilha_termica
-    from .modelo.samplers import carga, curtailment_rede, eolica, solar, termica
+    from .modelo.samplers import carga, curtailment_rede, eolica, solar, temperatura, termica
     _validar(args.samplers, TREINOS, "sampler")
     fn = {"eolica": eolica.treinar, "solar": solar.treinar, "carga": carga.treinar, "termica": termica.treinar,
-          "curtailment_rede": curtailment_rede.treinar, "hidro_fd": hidro_fd.calibrar,
+          "curtailment_rede": curtailment_rede.treinar, "temperatura": temperatura.treinar, "hidro_fd": hidro_fd.calibrar,
           "pilha": lambda: pilha_termica.montar_todas(rebuild=True)}
     for nome in args.samplers or list(TREINOS):
         logger.info(f"=== treinar: {nome}")

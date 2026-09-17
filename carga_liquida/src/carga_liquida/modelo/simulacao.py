@@ -27,6 +27,7 @@ from .samplers.carga import CargaSampler
 from .samplers.curtailment_rede import CurtailmentRedeSampler
 from .samplers.eolica import EolicaSampler
 from .samplers.solar import SolarSampler
+from .samplers.temperatura import TemperaturaSampler
 from .samplers.termica import TermicaSampler
 
 logger = get_logger("simulacao")
@@ -51,6 +52,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
     s_carga, s_eol = CargaSampler(), EolicaSampler()
     s_cent, s_dist = SolarSampler("centralizada"), SolarSampler("distribuida")
     s_rede = CurtailmentRedeSampler() if cfg.get("curtailment_rede", True) else None
+    s_temp = TemperaturaSampler()
     modo_va = cfg.get("termica_flexivel") == "valor_agua"
     s_term = TermicaSampler() if not modo_va else None
     va_dia = valor_agua.serie_diaria(anos, meses) if modo_va else None
@@ -72,9 +74,15 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         temp_mes = _temperatura_mensal(ano, mes, clim, temp_mensal)
         n_dias = calendar.monthrange(ano, mes)[1]
         dias = [date(ano, mes, dia) for dia in range(1, n_dias + 1)]
-        temps = {dia: temperatura.temperaturas_dia(ano, mes, dia) if clim else None for dia in range(1, n_dias + 1)}
-        carga_mes = s_carga.gerar_dias(dias, r.carga, temp_mes, temps)      # determinístico: uma vez por mês
+        temps_reais = {dia: temperatura.temperaturas_dia(ano, mes, dia) if clim else None for dia in range(1, n_dias + 1)}
+        completo = all(v is not None for v in temps_reais.values())
+        carga_mes = s_carga.gerar_dias(dias, r.carga, temp_mes, temps_reais) if completo else None   # determinística com temperatura real
         for sim in range(1, n_sim + 1):
+            if not completo:                                   # dias sem temperatura real: anomalia diária amostrada
+                temps = {**s_temp.gerar_mes(mes, temp_mes, n_dias, rng), **{d: v for d, v in temps_reais.items() if v is not None}}
+                carga_mes = s_carga.gerar_dias(dias, r.carga, temp_mes, temps)
+            else:
+                temps = temps_reais
             eol_mes = s_eol.gerar_mes(mes, r.eolica, n_dias, rng, teto=float(r.eolica_capacidade))
             cent_mes, dist_mes = s_cent.gerar_mes(mes, r.solar_centralizada, n_dias, rng), s_dist.gerar_mes(mes, r.solar_distribuida, n_dias, rng)
             for dia in range(1, n_dias + 1):
