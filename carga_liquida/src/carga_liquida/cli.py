@@ -62,6 +62,8 @@ def cmd_validar(args):
         perfis.testar_eolica().to_csv(output_dir("validacao") / "perfis_eolica.csv", index=False)
         logger.info("=== perfis: carga")
         perfis.testar_carga().to_csv(output_dir("validacao") / "perfis_carga.csv", index=False)
+        logger.info("=== perfis: solar")
+        perfis.testar_solar().to_csv(output_dir("validacao") / "perfis_solar.csv", index=False)
         return
     comparar.validar()
 
@@ -118,7 +120,7 @@ def main(argv=None):
     s.set_defaults(func=cmd_simular)
 
     s = sub.add_parser("validar", help="observado vs simulado -> Output/validacao/")
-    s.add_argument("--perfis", action="store_true", help="só os testes de coerência dos perfis diários (eólica e carga; validacao/perfis.py)")
+    s.add_argument("--perfis", action="store_true", help="só os testes de coerência dos perfis diários (eólica, carga e solar; validacao/perfis.py)")
     s.set_defaults(func=cmd_validar)
 
     s = sub.add_parser("tudo", help="baixar + processar + analisar + treinar + simular + validar")

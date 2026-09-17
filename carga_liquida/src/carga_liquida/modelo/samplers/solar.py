@@ -27,9 +27,9 @@ def _serie_centralizada() -> pd.DataFrame:
     try:
         coff = ons.carregar_coff_horario("solar")[["din_instante", "potencial_mw"]].rename(columns={"potencial_mw": "mw"})
         usina = usina[usina["din_instante"] < coff["din_instante"].min()]
-        return pd.concat([usina, coff], ignore_index=True)
+        return _sem_dias_ruins(pd.concat([usina, coff], ignore_index=True).dropna())
     except FileNotFoundError:
-        return usina
+        return _sem_dias_ruins(usina.dropna())
 
 
 def _serie_distribuida() -> pd.DataFrame:
@@ -38,7 +38,20 @@ def _serie_distribuida() -> pd.DataFrame:
     if col not in ger.columns:
         raise FileNotFoundError("Sem coluna de solar MMGD no processado; rode `python run.py processar`")
     df = ger[["din_instante", col]].rename(columns={col: "mw"}).dropna()
-    return df[df["mw"] > 0]
+    return _sem_dias_ruins(df[df.groupby(df["din_instante"].dt.normalize())["mw"].transform("max") > 0])
+
+
+def _sem_dias_ruins(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove dias com geração 'à noite' (0–3h acima de 1 % do máximo do dia): artefatos de preenchimento do ONS
+    (ex.: MMGD 2024-11-10, 7.949 MW constantes de 0h a 7h). Os zeros noturnos legítimos FICAM na série — descartá-los
+    (legado: `mw > 0`) fazia a média noturna virar a média dos poucos artefatos e o perfil de novembro ganhar 1,0 à noite."""
+    dia = df["din_instante"].dt.normalize()
+    noite = df[df["din_instante"].dt.hour <= 3].groupby(dia[df["din_instante"].dt.hour <= 3])["mw"].max()
+    mx = df.groupby(dia)["mw"].max()
+    ruins = noite.index[noite > 0.01 * mx.reindex(noite.index)]
+    if len(ruins):
+        logger.info(f"  {len(ruins)} dia(s) com geração noturna descartado(s): {[d.strftime('%Y-%m-%d') for d in ruins[:5]]}")
+    return df[~dia.isin(ruins)]
 
 
 def treinar() -> dict:
@@ -77,10 +90,10 @@ class SolarSampler:
 
     def perfil(self, mes: int) -> np.ndarray:
         prop = np.array(self.p[mes]["perfil_proporcional"])
+        prop = np.where(prop < 0.005 * prop.max(), 0.0, prop)     # resíduo noturno da referência COFF (poucos MW) -> 0
         if self.shape != 1.0:
             prop = prop ** self.shape
-            prop = prop / prop.sum()
-        return prop
+        return prop / prop.sum()
 
     def gerar_dia(self, mes: int, mw_medios: float) -> np.ndarray:
         """24 valores (MW) com média = mw_medios (determinístico)."""

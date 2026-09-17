@@ -11,15 +11,20 @@ Carga: compara a última simulação (determinística) com o balanço: forma por
 classe de dia, nível vs temperatura do dia, forma por tercil de temperatura, rampas, meia-noite e o resíduo. Foi isto
 que mostrou que a temperatura não movia o nível do dia (Σ perfil = 24 renormalizado no dia) e que sábado, domingo e
 feriado tinham o mesmo nível.
+Solar: centralizada (potencial COFF) e distribuída (MMGD) vs último cenário: forma por mês (pico, horas de sol, hora do
+pico), nível diário, forma condicional ao nível, rampas, correlação com a eólica, limites. Foi isto que mostrou que o
+expoente 1,5 do legado dava pico +10 % e dia 1 h mais curto, e que descartar os zeros noturnos no treino (`mw > 0`)
+deixava um artefato do ONS (2024-11-10) virar 1,0 de geração noturna no perfil de novembro.
 """
 import calendar
 
 import numpy as np
 import pandas as pd
 
-from ..config import get_logger
+from ..config import get_logger, load_config
 from ..dados import ons, temperatura
 from ..modelo import feriados, simulacao
+from ..observado import carga_liquida as cl
 from ..modelo.samplers.eolica import EolicaSampler
 
 logger = get_logger("perfis")
@@ -154,4 +159,66 @@ def testar_carga(inicio: str = "2024-01-01") -> pd.DataFrame:
     out = pd.DataFrame(linhas).groupby(["teste", "estatistica"], sort=False).agg(obs=("obs", "max"), sim=("sim", "max")).reset_index()
     for r in out.itertuples():
         logger.info(f"  {r.teste:<46} {r.estatistica:<16} obs {r.obs:9.3f}   sim {r.sim:9.3f}")
+    return out
+
+
+def testar_solar(inicio: str = "2024-04-01") -> pd.DataFrame:
+    """Solar centralizada (potencial COFF) e distribuída (MMGD) observadas vs último cenário simulado."""
+    tipo = load_config()["carga_liquida"]["tipo_usina_solar"]
+    ger = cl.carregar_geracao_por_tipo()
+    sim = simulacao.carregar_resultados()
+    sim = sim[sim["simulacao"] == 1]
+    w = ons.carregar_coff_horario("eolica")[["din_instante", "potencial_mw"]].rename(columns={"potencial_mw": "y"})
+    fontes = {
+        "centralizada": (ons.carregar_coff_horario("solar")[["din_instante", "potencial_mw"]].rename(columns={"potencial_mw": "y"}),
+                         sim[["din_instante", "val_gersolar_cent"]].rename(columns={"val_gersolar_cent": "y"})),
+        "distribuida": (ger[["din_instante", f"{tipo} - MMGD"]].rename(columns={f"{tipo} - MMGD": "y"}).dropna(),
+                        sim[["din_instante", "val_gersolar_dist"]].rename(columns={"val_gersolar_dist": "y"})),
+    }
+
+    def prep(d):
+        d = d[d["din_instante"] >= inicio].sort_values("din_instante").copy()
+        d["dia"], d["hora"], d["mes"] = d["din_instante"].dt.normalize(), d["din_instante"].dt.hour, d["din_instante"].dt.month
+        d["ym"] = d["din_instante"].dt.to_period("M")
+        d["dm"], d["mm"] = d.groupby("dia")["y"].transform("mean"), d.groupby("ym")["y"].transform("mean")
+        d["D"], d["f"] = d["dm"] / d["mm"], d["y"] / d["dm"].replace(0, np.nan)
+        return d
+
+    Dw = prep(w).groupby("dia")["D"].first().rename("Dw")
+    linhas = []
+
+    def add(fonte, teste, nome, lab, v):
+        linhas.append({"fonte": fonte, "teste": teste, "estatistica": nome, "obs": v if lab == "obs" else np.nan, "sim": v if lab == "sim" else np.nan})
+
+    for fonte, (o, s) in fontes.items():
+        o, s = prep(o), prep(s)
+        comum = set(o["dia"]) & set(s["dia"])
+        o, s = o[o["dia"].isin(comum)], s[s["dia"].isin(comum)]
+        po, ps = o.groupby(["mes", "hora"])["f"].mean().unstack(), s.groupby(["mes", "hora"])["f"].mean().unstack()
+        add(fonte, "1 forma média do dia", "MAE por hora (média dos meses)", "sim", float(np.abs(po - ps).mean().mean()))
+        for lab, pp in (("obs", po), ("sim", ps)):
+            add(fonte, "1 forma média do dia", "pico (fração da média do dia), média dos meses", lab, float(pp.max(axis=1).mean()))
+            add(fonte, "1 forma média do dia", "horas > 5 % do pico, média dos meses", lab, float((pp > 0.05 * pp.max(axis=1).values[:, None]).sum(axis=1).mean()))
+        for lab, d in (("obs", o), ("sim", s)):
+            D = d.groupby("dia")["D"].first()
+            for nome, v in (("std", D.std()), ("P10", D.quantile(.1)), ("P90", D.quantile(.9))):
+                add(fonte, "2 nível diário D", nome, lab, v)
+            add(fonte, "2 nível diário D", "autocorr lag 1", lab, D.autocorr(1) if D.std() > 1e-9 else 0.0)
+            g = d[d["hora"].between(7, 16)].groupby("dia").agg(D=("D", "first"), pico=("f", "max"))
+            g["terc"] = pd.qcut(g["D"].rank(method="first"), 3, labels=["nublado", "médio", "limpo"])
+            for terc, v in g.groupby("terc", observed=True)["pico"].median().items():
+                add(fonte, "3 pico por tercil do nível", terc, lab, v)
+            r = (d.groupby("dia")["y"].diff() / d["mm"]).dropna()
+            add(fonte, "4 rampas (fração da média do mês)", "std", lab, r.std())
+            add(fonte, "4 rampas (fração da média do mês)", "P99", lab, r.quantile(.99))
+            pm = d.groupby(["mes", "hora"])["f"].transform("mean")
+            z = (d["f"] - pm)[d["hora"].between(7, 16)]
+            add(fonte, "5 resíduo intradiário (horas de sol)", "std", lab, z.std())
+            j = D.reset_index().merge(Dw.reset_index(), on="dia")
+            add(fonte, "6 correlação do nível com a eólica", "corr", lab, j["D"].corr(j["Dw"]) if j["D"].std() > 1e-9 else 0.0)
+            add(fonte, "7 limites", "máx MW", lab, d["y"].max())
+            add(fonte, "7 limites", "% horas noturnas > 1 MW", lab, 100 * (d[d["hora"].isin([22, 23, 0, 1, 2, 3, 4])]["y"] > 1).mean())
+    out = pd.DataFrame(linhas).groupby(["fonte", "teste", "estatistica"], sort=False).agg(obs=("obs", "max"), sim=("sim", "max")).reset_index()
+    for r in out.itertuples():
+        logger.info(f"  {r.fonte:<13} {r.teste:<38} {r.estatistica:<44} obs {r.obs:10.3f}   sim {r.sim:10.3f}")
     return out

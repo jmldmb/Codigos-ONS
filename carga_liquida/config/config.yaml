@@ -177,7 +177,9 @@ modelo:
                 12: -876, 13: -428, 14: 105, 15: 732, 16: 1489, 17: 2520, 18: 3564, 19: 3602, 20: 3125, 21: 2621, 22: 2215, 23: 1708}
     peso_weekday: 1352
     peso_fds: 1523
-  # Solar: expoente de forma aplicado ao perfil proporcional (acentua pico, suaviza rampas)
+  # Solar: expoente de forma aplicado ao perfil proporcional. O legado usava 1,5 na centralizada (acentuava o pico) porque
+  # treinava na geração pós-corte, achatada ao meio-dia; com o potencial COFF o perfil médio já é o certo (1,5 dava pico
+  # +10 % e dia 1 h mais curto que o observado: teste `validar --perfis`). 1,0 = perfil médio observado.
   # Fator diário D (média do dia / média do mês, AR(1) em log, parâmetros por mês estimados no treino; samplers/_diario.py).
   # Eólica: std de D 0,13 (set) a 0,40 (fev), ρ 0,4–0,8 — sem ele todo dia simulado tem a média do mês e não existem
   # dias de vento forte (onde o corte energético acontece) nem fraco (térmica extra, picos de preço).
@@ -189,7 +191,7 @@ modelo:
   # Só corta a cauda (0,01 % das horas): o máximo agregado observado fica em ~0,87 da instalada por diversidade espacial.
   eolica_teto_capacidade: true
   solar_fator_diario: false               # std de D 0,06–0,16 (cent.), 0,06–0,09 (dist.): segunda ordem; ligar só com o eólico
-  solar_centralizada_shape: 1.5
+  solar_centralizada_shape: 1.0
   solar_distribuida_shape: 1.0
   solar_share_centralizada_default: 0.36  # meses sem dado de MMGD (2022): fração centralizada do total
   # Preço
