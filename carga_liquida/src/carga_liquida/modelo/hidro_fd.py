@@ -7,6 +7,13 @@ varia com a hora (dFD/dR ≈ 0,54 ao meio-dia, 0,27 na ponta) e satura em R alto
 `ghr` por hora e o termo quadrático capturam isso. Os parâmetros padrão (config.modelo.hidro_fd) são os
 do mini_dessem (ghr único, sem R²); `calibrar()` reestima tudo por OLS nos dados observados e grava em
 params_dir/hidro_fd.json, que passa a ter precedência.
+
+A regressão é a FD "natural" (vazão): é treinada FORA das horas de sobra (corte energético > 0 no COFF; antes do COFF,
+CMO < 10 com R < 17 GW). Na sobra o operador verte água turbinável e a FD fica abaixo disso — em média
+`reducao_sobra_mw` (~1,8 GW) nas horas com corte > 1 GW; a redução cresce com a sobra e satura (~0,5 GW quando o corte
+é < 0,5 GW, ~2,2 GW quando é 4–8 GW; a FD absorve 73 % da sobra pequena e 10 % da grande). O despacho usa isso como
+recurso: R no mínimo e base térmica no piso -> reduz a FD até `reducao_sobra_mw` -> só então corta renovável
+(config.modelo.fd_reducao_sobra). Na escassez não há efeito mensurável (coeficiente −0,2 GW, n.s.).
 """
 import json
 
@@ -37,6 +44,7 @@ def parametros(recarregar: bool = False) -> dict:
             origem = "config (legado)"
         ghr = float(raw["ghr"])
         _PARAMS = {"intercept": float(raw["intercept"]), "ghr": ghr, "ena": float(raw["ena"]),
+                   "reducao_sobra_mw": float(raw.get("reducao_sobra_mw", 0.0)),
                    "ghr_hora": {int(k): float(v) for k, v in raw.get("ghr_hora", {h: ghr for h in range(24)}).items()},
                    "r2": float(raw.get("r2", 0.0)),
                    "peso_mes": {int(k): float(v) for k, v in raw["peso_mes"].items()},
@@ -53,12 +61,22 @@ def calcular_fd(mes: int, hora: int, is_weekday: bool, R: float, ena: float, p: 
 
 
 def base_observada() -> pd.DataFrame:
-    """Horas com FD, R (histórico) e ENA armazenável do dia."""
+    """Horas com FD, R (histórico), ENA armazenável do dia e o rótulo de sobra: `ene` (corte energético observado, MW;
+    NaN antes do COFF) e `sobra` (ene > 0; antes do COFF, CMO < 10 com R < 17 GW)."""
     h = cl.carregar_historico()[["din_instante", "FD", "R", "mes", "hora"]].copy()
     ena = ons.carregar_ena()[["ena_data", "ena_armazenavel_mwmed"]].rename(columns={"ena_armazenavel_mwmed": "ena"})
     h["ena_data"] = h["din_instante"].dt.normalize()
     df = h.merge(ena, on="ena_data", how="inner").dropna(subset=["FD", "R", "ena"])
     df["is_weekday"] = df["din_instante"].dt.date.map(feriados.tipo_dia) == "DU"
+    try:
+        c = ons.carregar_curtailment()[["din_instante", "curtailment_ene_mw"]].rename(columns={"curtailment_ene_mw": "ene"})
+        df = df.merge(c, on="din_instante", how="left")
+    except FileNotFoundError:
+        df["ene"] = np.nan
+    cmo = ons.carregar_cmo()
+    cmo["din_instante"] = cmo["din_instante"].dt.floor("h")
+    df = df.merge(cmo.groupby("din_instante", as_index=False)["val_cmo"].mean(), on="din_instante", how="left")
+    df["sobra"] = np.where(df["ene"].notna(), df["ene"] > 0, (df["val_cmo"] < 10) & (df["R"] < 17000))
     return df.reset_index(drop=True)
 
 
@@ -73,9 +91,7 @@ def avaliar(df: pd.DataFrame, p: dict) -> dict:
             "r2": float(1 - (erro ** 2).sum() / ((df["FD"] - df["FD"].mean()) ** 2).sum()), "n": int(len(df))}
 
 
-def calibrar(salvar: bool = True) -> dict:
-    """OLS com R por hora (24 inclinações), R², ENA, dummies de mês (ref. dezembro), hora (ref. 23h) e FDS."""
-    df = base_observada()
+def _matriz(df: pd.DataFrame) -> pd.DataFrame:
     X = pd.DataFrame({"const": 1.0, "ena": df["ena"], "fds": (~df["is_weekday"]).astype(float), "Rq": (df["R"] / 1000.0) ** 2})
     for h in range(24):
         X[f"R{h}"] = df["R"] * (df["hora"] == h)
@@ -83,6 +99,15 @@ def calibrar(salvar: bool = True) -> dict:
         X[f"m{m}"] = (df["mes"] == m).astype(float)
     for h in range(23):
         X[f"h{h}"] = (df["hora"] == h).astype(float)
+    return X
+
+
+def calibrar(salvar: bool = True) -> dict:
+    """OLS com R por hora (24 inclinações), R², ENA, dummies de mês (ref. dezembro), hora (ref. 23h) e FDS, treinada
+    fora das horas de sobra; `reducao_sobra_mw` = FD média abaixo da regressão nas horas com corte energético > 1 GW."""
+    todos = base_observada()
+    df = todos[~todos["sobra"]].reset_index(drop=True)
+    X = _matriz(df)
     beta, *_ = np.linalg.lstsq(X.values, df["FD"].values, rcond=None)
     b = dict(zip(X.columns, beta))
     ghr_hora = {h: b[f"R{h}"] for h in range(24)}
@@ -90,6 +115,11 @@ def calibrar(salvar: bool = True) -> dict:
          "peso_mes": {m: b.get(f"m{m}", 0.0) for m in range(1, 13)},
          "peso_hora": {h: b.get(f"h{h}", 0.0) for h in range(24)},
          "peso_weekday": 0.0, "peso_fds": b["fds"]}
+    corte = todos[todos["ene"] > 1000]
+    red = float((_matriz(corte).values @ beta - corte["FD"].values).mean()) if len(corte) else 0.0
+    p["reducao_sobra_mw"] = max(red, 0.0)
+    logger.info(f"treino fora da sobra: {len(df):,} de {len(todos):,} horas ({100 * todos['sobra'].mean():.1f}% em sobra); "
+                f"redução da FD nas {len(corte):,} horas com corte > 1 GW: {red:,.0f} MW")
     legado = load_config()["modelo"]["hidro_fd"]
     legado = {**legado, "peso_mes": {int(k): v for k, v in legado["peso_mes"].items()},
               "peso_hora": {int(k): v for k, v in legado["peso_hora"].items()}}

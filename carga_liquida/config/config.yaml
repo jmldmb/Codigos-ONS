@@ -141,6 +141,9 @@ modelo:
   # Limites operacionais (MW)
   limite_hidro_reservatorio: 42000
   min_hidro_reservatorio: 14500
+  # Na sobra (R no mínimo, base térmica no piso), a fio d'água verte água turbinável antes do corte de renovável, até
+  # params_fd.reducao_sobra_mw (média observada da FD abaixo da regressão nas horas com corte > 1 GW; ~1,8 GW).
+  fd_reducao_sobra: true
   # Térmica "inflexível" da simulação (o que o modelo NÃO decide):
   #   termica_total   -> geração térmica total observada/projetada (premissa do legado: val_inflexterm = val_gertermica)
   #   termica_forcada -> térmica total - térmica flexível observada (só o que é de fato forçado)

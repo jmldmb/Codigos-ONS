@@ -61,7 +61,7 @@ def despachar(carga: float, eolica: float, solar_cent: float, solar_dist: float,
         return None
     balanco = eol_pos + cent_pos + dist_pos + inflexterm + FD + R + termica_extra
     return {"val_term_despacho": termica_base + termica_extra, "val_term_base": termica_base, "val_term_extra": termica_extra,
-            "val_gerhidro_reservatorio": R, "val_gerhidro_fd": FD,
+            "val_gerhidro_reservatorio": R, "val_gerhidro_fd": FD, "val_fd_reduzida": fd_red,
             "curtailment": corte_eol + corte_cent + corte_dist, "curtailment_eolica": corte_eol,
             "curtailment_solar_cent": corte_cent, "curtailment_solar_dist": corte_dist,
             "val_gereolica_depois_corte": eol_pos, "val_gersolar_cent_depois_corte": cent_pos,
@@ -91,7 +91,8 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
         R no máximo, ainda falta       -> térmica extra por mérito (fora da base); PLD = CVU da última chamada
         R no mínimo, ainda sobra       -> base reduzida da mais cara para a mais barata, cada usina até o seu MÍNIMO
                                           TÉCNICO (pilha["minimo"]); PLD = CVU da usina parcialmente reduzida
-        base toda no mínimo, sobra     -> curtailment em cascata; PLD = piso
+        base toda no mínimo, sobra     -> FD reduzida (vertimento turbinável) até params_fd["reducao_sobra_mw"]; PLD = piso
+        ainda sobra                    -> curtailment em cascata; PLD = piso
     A usina comprometida não desliga na hora da sobra: o ONS a reduz ao mínimo e re-rotula como unit commitment
     (2025-26: térmica flexível 1,7 GW nas horas com corte energético > 1 GW; o modelo zerava). Ver README.
     """
@@ -109,6 +110,7 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
 
     eol, cent, dist = eolica, solar_cent, solar_dist
     cortes = (0.0, 0.0, 0.0)
+    fd_red = 0.0
     termica_base, termica_extra = base_cheia, 0.0
     folga = lambda r, t: carga - (eol + cent + dist + inflexterm + t + fd(r) + r)  # noqa: E731  >0 falta, <0 sobra
 
@@ -133,18 +135,21 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
         else:
             termica_base = base_cheia - reduzivel           # toda a base no mínimo técnico
             excesso = -folga(R, termica_base)
-            eol, cent, dist, cortes = _curtailment_cascata(excesso, eol, cent, dist)
+            fd_red = min(excesso, (params_fd or {}).get("reducao_sobra_mw", 0.0)) if cfg.get("fd_reducao_sobra", True) else 0.0
+            excesso -= fd_red                              # a FD verte antes do corte de renovável
+            if excesso > 0:
+                eol, cent, dist, cortes = _curtailment_cascata(excesso, eol, cent, dist)
             pld = piso
-            regime = "curtailment"
+            regime = "curtailment" if excesso > 0 else "fd_reduzida"
     else:                                                  # hidro marginal
         R = brentq(lambda r: folga(r, termica_base), mn, lim, xtol=cfg["solver_xtol"])
         pld = va_se
         regime = "hidro"
 
-    FD = fd(R)
+    FD = fd(R) - fd_red
     balanco = eol + cent + dist + inflexterm + FD + R + termica_base + termica_extra
     return {"val_term_despacho": termica_base + termica_extra, "val_term_base": termica_base, "val_term_extra": termica_extra,
-            "val_gerhidro_reservatorio": R, "val_gerhidro_fd": FD,
+            "val_gerhidro_reservatorio": R, "val_gerhidro_fd": FD, "val_fd_reduzida": fd_red,
             "curtailment": sum(cortes), "curtailment_eolica": cortes[0], "curtailment_solar_cent": cortes[1],
             "curtailment_solar_dist": cortes[2],
             "val_gereolica_depois_corte": eol, "val_gersolar_cent_depois_corte": cent, "val_gersolar_dist_depois_corte": dist,

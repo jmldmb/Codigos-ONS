@@ -130,16 +130,16 @@ manual do BALANCO_ENERGIA). Para 2026-28, `config/projecoes.yaml`.
 
 | componente | obs (MW) | sim (MW) | viés | MAE | MAE/média | R² |
 |---|---|---|---|---|---|---|
-| carga | 76.359 | 76.348 | −11 | 2.194 | 2,9 % | 0,92 |
-| eólica pós-corte | 11.480 | 11.402 | −79 | 2.332 | 20,3 % | 0,63 |
-| solar pós-corte | 7.002 | 6.923 | −79 | 752 | 10,7 % | 0,98 |
-| hidro FD | 24.089 | 24.092 | +3 | 1.779 | 7,4 % | 0,91 |
-| hidro R | 25.001 | 25.225 | +224 | 2.606 | 10,4 % | 0,75 |
-| térmica flexível | 1.203 | 1.247 | +44 | 629 | 52 % | 0,56 (mensal ~0,8) |
-| **carga líquida** | **26.175** | **26.437** | **+262** | **2.675** | **10,2 %** | **0,75** |
-| PLD vs CMO SE (R$/MWh) | 109 | 129 | +20 | 52 | — | **0,67** |
-| curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.579 | −372 | 1.714 | 58 % | 0,61 |
-| — só energético (ENE) | 1.618 | 1.256 | −362 | 1.105 | 68 % | 0,56 |
+| carga | 76.359 | 76.349 | −10 | 2.197 | 2,9 % | 0,92 |
+| eólica pós-corte | 11.480 | 11.453 | −28 | 2.353 | 20,5 % | 0,62 |
+| solar pós-corte | 7.002 | 6.961 | −41 | 603 | 8,6 % | 0,98 |
+| hidro FD | 24.089 | 24.125 | +36 | 1.750 | 7,3 % | 0,91 |
+| hidro R | 25.001 | 25.134 | +133 | 2.545 | 10,2 % | 0,76 |
+| térmica flexível | 1.203 | 1.228 | +25 | 618 | 51 % | 0,57 (mensal ~0,8) |
+| **carga líquida** | **26.175** | **26.327** | **+152** | **2.609** | **10,0 %** | **0,76** |
+| PLD vs CMO SE (R$/MWh) | 109 | 127 | +18 | 52 | — | **0,67** |
+| curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.441 | −510 | 1.712 | 58 % | 0,61 |
+| — só energético (ENE) | 1.618 | 1.118 | −500 | 1.103 | 68 % | 0,55 |
 
 **Distribuição por mês** (`validacao/distribuicao_mensal.csv`: quantis das horas observadas vs das horas simuladas de
 todos os cenários — critério para mudanças de *variabilidade*, onde a média dos cenários não conta): carga líquida
@@ -184,7 +184,18 @@ Histórico das últimas mudanças (mesma janela, mesma semente quando pareado):
    hidrologia: com hidro R no mínimo o modelo dá FD +1,0 GW acima da observada (ENE > 1 GW: +0,8; CMO < 10: +0,4) — o ONS
    também reduz a fio d'água na sobra (vertimento turbinável); com R > 35 GW ou CMO > 200 fica −0,4/−0,7 GW — na escassez
    o ONS a espreme; FD > 33 GW fica −1,5 GW. A regressão dá a FD média para (R, ENA); a FD real participa do despacho numa
-   faixa em torno dela. Não implementado (mudança estrutural no despacho; decisão pendente). Efeito
+   faixa em torno dela.
+8. FD na sobra (`fd_reducao_sobra`): a regressão passa a ser treinada FORA das horas de sobra (FD "natural", MAE 1.645 /
+   R² 0,916 nessas horas) e o despacho verte água turbinável — reduz a FD até `reducao_sobra_mw` (2,0 GW = FD média
+   abaixo da regressão nas horas com corte > 1 GW) depois do R no mínimo e da base no piso, antes de cortar renovável.
+   Evidência de que a FD absorve a sobra primeiro: redução de 0,5 GW quando o corte é < 0,5 GW (73 % da sobra), 2,2 GW
+   quando é 4–8 GW (28 %), 1,5 GW acima de 8 GW (10 %) — cresce e satura. Escassez: coeficiente −0,2 GW, n.s., não
+   implementado. Vertimento turbinável estimado do `dados_hidrologicos_di` (70 usinas FD, 0,7–2,9 GW médios por ano,
+   corr 0,34 com o resíduo) confirmou direção e ordem de grandeza, mas não separa decisão de vazão com precisão
+   (capacidade em cheia, unidades fora, resolução diária) — ficou como diagnóstico. A/B mesma semente: FD nas horas com
+   corte > 1 GW obs 16,6 GW, antes 18,1, agora 16,8; FD global viés +217 → +35, R² 0,904 → 0,910; teste pareado por dia
+   neutro (o dia de sobra simulado não é o observado); ENE médio cai 1.435 → 1.130 porque a sobra total do modelo é
+   menor que a real (obs: 1,6 GW de corte + ~0,4 de FD vertida) — o gap restante é de vento extremo e térmica, não de FD. Efeito
    colateral esperado: nas premissas placeholder de 2027-28 (carga 97 GW em fevereiro) aparecem ~80 horas/ano de déficit
    (dia quente + vento fraco, 18–21h: térmica toda despachada, PLD no CVU máximo) — `val_erro = 1` nessas horas.
 
