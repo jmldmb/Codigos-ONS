@@ -114,9 +114,10 @@ Mesma identidade nos dois lados: **observado** `R + térmica_flex` ≡ **simulad
 | Eólica | perfil médio por mês × ruído AR(1) multiplicativo `Y = μ(1+Z)`, φ≈0,95 | potencial COFF (geração + corte), 2023-10+ |
 | Solar | perfil determinístico por mês; centralizada (expoente 1,5) e distribuída (1,0) | COFF FV / geração usina não-MMGD; MMGD |
 | Hidro FD | `FD = c + 0,364·R + 0,108·ENA + mês + hora + FDS` (OLS; legado 0,33 / 0,15) | histórico FD/R + ENA diária; MAE 1,7 GW, R² 0,91 |
-| Térmica flexível | **premissa mensal exógena** (decisão energética do operador): observada no histórico, cenário em `projecoes.yaml`; modulação horária por perfil observado (mês × DU/FDS × hora) ou flat | histórico `termica_flexivel` |
-| Despacho | R até 42 GW; excesso → reduz R até 14,5 GW (brentq), depois corta eólica + solar cent. pro rata e por fim MMGD; déficit → térmica **extra** (saturação hidráulica) | — |
-| PLD | CVU da pilha térmica do mês no ponto `térmica_flex` (base + extra), piso 61 | pilha mensal = CVU semanal × capacidade **flexível** (máx. geração − inflexibilidade média, 12 meses), por `cod_usinaplanejamento`; ~18 GW |
+| Valor da água (`termica_flexivel: valor_agua`, padrão) | **premissa = preço-base semanal/mensal** (papel do DECOMP): histórico = mediana semanal do CMO (`valor_agua_fonte: cmo`) ou CVU da pilha na térmica observada (`pilha`); projeção em `projecoes.yaml` (ou derivado da térmica base pela pilha). Térmica base = pilha com CVU ≤ VA | CMO / térmica observada |
+| Despacho (`despachar_va`, papel do DESSEM) | hidro R fecha o balanço entre 14,5 e 42 GW; R no máximo → térmica extra por mérito; R no mínimo → base reduzida da mais cara para a mais barata, depois curtailment (eólica + solar cent. pro rata, por fim MMGD). **PLD horário = recurso marginal**: VA · CVU da extra · CVU da última reduzida · piso | — |
+| Alternativas | `exogena`: térmica base mensal como premissa (MW), perfil horário observado ou flat; `residual`: legado (térmica só na saturação) | — |
+| Pilha térmica | CVU semanal × capacidade **flexível** (máx. geração − inflexibilidade média, 12 meses), por `cod_usinaplanejamento`; ~18 GW | datasets `cvu` + `termica_despacho` |
 
 Premissas mensais (`modelo/premissas.py`): nos anos observados tudo vem dos dados — carga (+ exportação),
 eólica potencial, solar cent/dist, ENA armazenável SIN, térmica total (o `data.py` do legado era uma cópia
@@ -131,11 +132,13 @@ manual do BALANCO_ENERGIA). Para 2026-28, `config/projecoes.yaml`.
 | solar pós-corte | 6.198 | 6.260 | +62 | 702 | 11,3 % | 0,98 |
 | hidro FD | 23.627 | 23.749 | +122 | 1.777 | 7,5 % | 0,90 |
 | hidro R | 25.131 | 25.477 | +346 | 2.707 | 10,8 % | 0,74 |
-| térmica flexível | 1.039 | 1.039 | 0 | 381 | 36,7 % | 0,82 |
-| **carga líquida** | **26.170** | **25.853** | **−317** | **2.723** | **10,4 %** | **0,74** |
-| PLD vs CMO SE (R$/MWh) | 91 | 113 | +23 | 75 | — | 0,51 |
+| térmica flexível | 1.039 | 1.045 | +6 | 755 | 72,7 % | 0,30 |
+| **carga líquida** | **26.170** | **25.748** | **−422** | **2.816** | **10,8 %** | **0,73** |
+| PLD vs CMO SE (R$/MWh) | 91 | 112 | +22 | 50 | — | **0,70** |
 
-Com o despacho térmico do legado (`termica_flexivel: residual`): térmica flex ≈ 0 (R² −0,36), carga líquida viés −716 MW, PLD R² ≈ 0.
+Regimes simulados: hidro marginal 89 %, curtailment 8 %, base reduzida 2,7 %, extra 0,1 % (observado: ±50 % do patamar semanal em 78 % das horas; abaixo 16 %, concentradas 8–14h com R ≈ 15,6 GW; acima 6 %, 16–22h com R p90 38,5 GW). Desvio intradiário do preço: CMO 29 vs PLD 21 R$/MWh (27 com `limite_hidro_reservatorio: 38000`, que também faz o regime extra aparecer em 2,7 % das horas).
+
+Comparação dos modos (mesma simulação 2022-25): `valor_agua` com `fonte: pilha` (sem usar o CMO) → PLD R² 0,51, térmica R² 0,76; `exogena` → térmica R² 0,82, carga líquida viés −317, PLD R² 0,51; `residual` (legado) → térmica ≈ 0, carga líquida viés −716, PLD R² ≈ 0. O ganho de R² 0,70 vem do nível do patamar ser premissa; o modelo entrega a modulação.
 
 Por que a térmica flexível é premissa e não decisão do modelo: o despacho herdado só chamava térmica quando a
 hidro batia no limite (térmica ≈ 0 em 99,7 % das horas vs 48 % observado), e nenhuma variável disponível a
@@ -171,8 +174,9 @@ e subestima picos (out/2024: 360 vs 516).
   geração observada não; somar fecha a identidade contábil (~0,2–1 GW).
 - **Hidro FD** recalibrada por OLS em 2022-25 (MAE 1,7 GW vs 1,85 GW dos parâmetros do legado nos mesmos dados).
 - **Cascata de curtailment**: quando eólica + solar centralizada = 0, o legado não cortava nada; aqui a distribuída é cortada.
-- **Térmica flexível exógena** (`termica_flexivel: exogena`) e **pilha só com capacidade flexível** (`pld_offset_mw: 0`;
-  o legado somava 3.500 MW, que compensava a nuclear na base da pilha).
+- **Despacho por valor da água** (`termica_flexivel: valor_agua`, estrutura DECOMP → DESSEM) com preço horário pelo recurso
+  marginal; `exogena` (térmica base mensal) e `residual` (legado) continuam como opções. **Pilha só com capacidade flexível**
+  (`pld_offset_mw: 0`; o legado somava 3.500 MW, que compensava a nuclear na base da pilha).
 - `data.py` (dicionários manuais) → `premissas.py` (dados) + `projecoes.yaml`; feriados calculados em vez de tabela 2023-25.
 
 - **Pilha térmica** montada dos dados ONS (`cvu_usitermica_se` + despacho térmico) em vez das planilhas manuais
@@ -184,4 +188,6 @@ e subestima picos (out/2024: 360 vs 516).
 - Fontes das projeções 2026-28 em `projecoes.yaml` (herdadas sem documentação).
 - 5 UHEs pequenas sem classificação R/FD no cadastro (~50 MW): Alto Jatapu, Conj. Barreiras, Eng. Dreher,
   Eng. Kotzian, Juruena.
-- Premissa de térmica flexível 2026-28 em `projecoes.yaml` (hoje: placeholder = observado de 2025).
+- Premissa de preço-base / térmica flexível 2026-28 em `projecoes.yaml` (hoje: placeholder = térmica observada de 2025).
+- Calibrar `limite_hidro_reservatorio` (teto efetivo da hidro) pelo regime de degrau observado (~38–40 GW?).
+- Separar a base em ordem de mérito (estável) e unit commitment (intradiário, ~27 %) — hoje ambos vêm da pilha.
