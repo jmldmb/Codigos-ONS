@@ -1,7 +1,7 @@
 """Interface de linha de comando (ver run.py)."""
 import argparse
 
-from .config import get_logger, load_config
+from .config import get_logger, load_config, output_dir
 
 logger = get_logger("cli")
 
@@ -56,7 +56,11 @@ def cmd_simular(args):
 
 
 def cmd_validar(args):
-    from .validacao import comparar
+    from .validacao import comparar, perfis
+    if getattr(args, "perfis", False):
+        out = perfis.testar_eolica()
+        out.to_csv(output_dir("validacao") / "perfis_eolica.csv", index=False)
+        return
     comparar.validar()
 
 
@@ -112,6 +116,7 @@ def main(argv=None):
     s.set_defaults(func=cmd_simular)
 
     s = sub.add_parser("validar", help="observado vs simulado -> Output/validacao/")
+    s.add_argument("--perfis", action="store_true", help="só os testes de coerência dos perfis diários eólicos (validacao/perfis.py)")
     s.set_defaults(func=cmd_validar)
 
     s = sub.add_parser("tudo", help="baixar + processar + analisar + treinar + simular + validar")

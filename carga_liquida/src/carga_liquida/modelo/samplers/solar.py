@@ -90,4 +90,4 @@ class SolarSampler:
         """Matriz (n_dias, 24) em MW com média do mês = mw_medios; fator diário só se `solar_fator_diario`."""
         if not self.fator_diario:
             return np.tile(self.gerar_dia(mes, mw_medios), (n_dias, 1))
-        return _diario.gerar_mes(self.perfil(mes), self.p[mes], mw_medios, n_dias, rng or np.random.default_rng(), ruido=False)
+        return _diario.gerar_mes(self.perfil(mes), self.p[mes], mw_medios, n_dias, rng or np.random.default_rng(), ruido=False, aditivo=False)

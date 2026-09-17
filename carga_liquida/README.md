@@ -58,7 +58,7 @@ python run.py processar              # Data/raw -> Output/observado/*.parquet (~
 python run.py analisar               # observado: hidro cmo diarios curtailment
 python run.py treinar                # samplers eolica solar carga termica curtailment_rede + hidro_fd + pilhas térmicas -> Output/modelo/ (~40 s)
 python run.py simular --anos 2024 2025 -n 6 --seed 42   # Monte Carlo -> Output/modelo/ (~4 s por ano)
-python run.py validar                # observado vs simulado -> Output/validacao/
+python run.py validar                # observado vs simulado -> Output/validacao/  (--perfis: coerência dos perfis eólicos)
 python run.py tudo                   # tudo acima, em ordem
 ```
 
@@ -111,7 +111,7 @@ Mesma identidade nos dois lados: **observado** `R + térmica_flex` ≡ **simulad
 | Bloco | Premissa (herdada do mini_dessem) | Treino / fonte |
 |---|---|---|
 | Carga v6 | `carga_norm(h) = a[tipo,mês,h] + b[tipo,mês,h]·temp(h)`, Σ=24, DU vs FDS (fim de semana + feriado), ajuste de viés por hora | balanço SIN + temperatura; MAPE 3,9 %, R² 0,87 |
-| Eólica | `Y_{d,h} = μ_h(mês) · D_d · (1+Z_{d,h})`: perfil médio por mês × **fator diário D** (cópula gaussiana AR(1) sobre a distribuição empírica de média do dia / média do mês: std 0,13 set → 0,40 fev, P10/P90 0,5/1,5 no verão, ρ dia a dia 0,4–0,8) × ruído AR(1) horário (φ≈0,95, σ≈0,08, redistribui dentro do dia); média do **mês** = premissa. O legado renormalizava cada dia (D ≡ 1: nenhum dia de vento forte ou fraco) e estimava φ/σ nos perfis médios mês a mês (σ ≈ 0,02) | potencial COFF (geração + corte), 2023-10+ |
+| Eólica | `Y_{d,h} = M · [p_h(mês) + (D_d − 1) + Z_{d,h}]`: perfil normalizado por mês + **fator diário D** (cópula gaussiana AR(1) sobre a distribuição empírica de média do dia / média do mês: std 0,13 set → 0,40 fev, P10/P90 0,5/1,5 no verão, ρ dia a dia 0,4–0,8; constante no dia com transição de ±3 h na meia-noite) + ruído AR(1) horário (φ≈0,9, σ≈0,05–0,09, média móvel de 24 h removida); média do **mês** = premissa. O nível do dia é **aditivo**: a amplitude diurna em MW não depende de quanto ventou (perfil por tercil de D é o mesmo deslocado; multiplicar estourava a capacidade: 43,8 GW vs 29,5 observados). O legado renormalizava cada dia (D ≡ 1) e estimava φ/σ nos perfis médios mês a mês (σ ≈ 0,02). Testes de coerência: `python run.py validar --perfis` | potencial COFF (geração + corte), 2023-10+ |
 | Solar | perfil determinístico por mês; centralizada (expoente 1,5) e distribuída (1,0); fator diário opcional (`solar_fator_diario`, std de D 0,06–0,16: segunda ordem) | COFF FV / geração usina não-MMGD; MMGD |
 | Curtailment de rede (`curtailment_rede: true`) | **premissa mensal exógena** (CNF/REL do COFF: restrições regionais de transmissão, quase todo NE, que ocorrem mesmo com o SIN precisando da energia): histórico = observado; projeção em `projecoes.yaml`. Alocado por hora pelo perfil observado (mês × hora; pica às 7–9h, ~20 % do potencial eólico vs ~6 % de madrugada), limitado ao potencial, e subtraído da eólica e da solar centralizada **antes** do despacho. O corte energético (ENE) continua endógeno | COFF 2023-10+ |
 | Hidro FD | `FD = c + ghr[hora]·R − 8·(R/GW)² + 0,09·ENA + mês + hora + FDS` — a resposta ao R varia com a hora (0,91 ao meio-dia, 0,76 às 19h) e satura (marginal ≈ 0,45 em R = 20 GW, 0,2 em 35 GW); legado: ghr único 0,33 | histórico FD/R + ENA diária; MAE 1,77 GW, R² 0,91 |
@@ -173,6 +173,12 @@ Por que o fator diário eólico: 91 % do gap de ENE estava nos dias com vento > 
 dias vs 1,15 nos dias < 0,7×; o simulado era flat em ~1,8 porque todo dia tinha a média do mês). A marginal de D é a
 empírica do mês e não uma lognormal porque D é limitado pela capacidade instalada (lognormal dava P99 2,6 em fevereiro
 contra máximo observado 1,9). Correlação diária eólica × solar +0,29 (0,5–0,6 em fev–abr, ~0 em mai–set): não modelada.
+**Testes de coerência dos perfis** (`validar --perfis`, `Output/validacao/perfis_eolica.csv`, obs vs sim 2024-26): forma
+média do dia MAE 0,006–0,035; amplitude do perfil por tercil de D 2,5/1,8/1,6 vs 2,3/1,7/1,6 (a forma multiplicativa dava
+1,9/1,8/1,9); rampas std 0,073 vs 0,086 e P99 0,18 vs 0,21 (15 % grandes); salto na meia-noite igual ao das outras horas
+(0,048 vs 0,055; era 0,20 com D em degrau e demédia por dia); autocorrelação intradiária 0,91/0,56 vs 0,86/0,49;
+persistência de D 0,69/0,35/0,14 vs 0,60/0,32/0,15; std horário total por mês 5–15 % abaixo do observado; máximo horário
+33,6 GW vs 29,5 (sem teto de capacidade instalada — pendente, seria uma premissa).
 
 Regimes simulados: hidro marginal 82 %, curtailment 13 %, base reduzida 1 %, extra 3 % (observado: ±50 % do patamar semanal em 78 % das horas; abaixo 16 %, concentradas 8–14h com R ≈ 15,6 GW; acima 6 %, 16–22h com R p90 38,5 GW). **Componente intradiária** (`validacao/metricas_intradiarias.csv`, desvios da média diária): PLD corr 0,53 / R² 0,28 / MAE 27; hidro R corr 0,93 / R² 0,82; térmica corr 0,33 / MAE 226 (R² −0,9: ainda pior que flat, mas era −4,4); spikes horários (> 1,5× a mediana da semana operativa, mesma definição nos dois lados; obs 3,3 % das horas, sim 1,6 %): precisão 0,16, recall 0,08 — o modelo raramente acerta *quando* o degrau ocorre. Qualquer mudança de estrutura horária deve ser julgada por estas métricas em teste pareado por dia, não pelo desvio-padrão.
 
@@ -218,7 +224,8 @@ não está em dado público) e a correlação eólica × solar no verão; o cort
 - **Corte de rede como premissa** (`curtailment_rede`): o legado (e o despacho) só produz corte energético; o de rede
   (CNF/REL, 2 GW médios em 2025) entra como premissa mensal com perfil horário observado, no padrão da térmica flexível.
 - **Fator diário eólico** (`eolica_fator_diario`): o legado renormalizava cada dia simulado à média do mês; agora a
-  média do dia segue a distribuição observada (cópula gaussiana AR(1)) e só o mês é renormalizado. `samplers/_diario.py`.
+  média do dia segue a distribuição observada (cópula gaussiana AR(1), aditiva ao perfil) e só o mês é renormalizado.
+  `samplers/_diario.py`; testes em `validacao/perfis.py`.
 - **Mínimo técnico na sobra** (`pilha_minimo_quantil`): a base comprometida reduz até o piso de cada usina, não até zero;
   a ordem continua da mais cara para a mais barata (na realidade o ONS desliga quem consegue ciclar, mas o total é o que
   fecha o balanço). `0` volta ao comportamento antigo.
