@@ -73,17 +73,22 @@ def iterar_termica_despacho(colunas: list[str], inicio: str | None = None, fim: 
         yield _filtrar_periodo(df, inicio, fim)
 
 
-def carregar_cmo(subsistema: str | None = None,
+def carregar_cmo(subsistema: str | None = "config",
                  inicio: str | None = None, fim: str | None = None) -> pd.DataFrame:
-    """CMO semi-horário (din_instante, val_cmo) de um subsistema (default config.carga_liquida.cmo_subsistema)."""
+    """CMO semi-horário (din_instante, val_cmo) de um subsistema ("config" = config.carga_liquida.cmo_subsistema;
+    None = todos, com coluna id_subsistema)."""
     ini, end = periodo()
     inicio, fim = inicio or ini, fim or end
-    subsistema = subsistema or load_config()["carga_liquida"]["cmo_subsistema"]
     dfs = [pd.read_parquet(p) for p in _arquivos("cmo", inicio, fim)]
     df = pd.concat(dfs, ignore_index=True)
-    df = df[df["nom_subsistema"].str.upper() == subsistema.upper()].copy()
     df["val_cmo"] = pd.to_numeric(df["val_cmo"], errors="coerce")
     df = _filtrar_periodo(df, inicio, fim)
+    if subsistema is None:
+        df["id_subsistema"] = df["id_subsistema"].astype(str).str.upper().str.strip()
+        return df[["din_instante", "id_subsistema", "val_cmo"]].sort_values("din_instante").reset_index(drop=True)
+    if subsistema == "config":
+        subsistema = load_config()["carga_liquida"]["cmo_subsistema"]
+    df = df[df["nom_subsistema"].str.upper() == subsistema.upper()]
     return df[["din_instante", "val_cmo"]].sort_values("din_instante").reset_index(drop=True)
 
 
