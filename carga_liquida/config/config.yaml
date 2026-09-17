@@ -200,8 +200,11 @@ modelo:
   solar_centralizada_shape: 1.0
   solar_distribuida_shape: 1.0
   solar_share_centralizada_default: 0.36  # meses sem dado de MMGD (2022): fração centralizada do total
-  # Preço
+  # Preço: o despacho devolve `cmo` (custo marginal do recurso marginal: 0 na sobra, VA, CVU) e `pld` = clip(cmo, piso, teto).
+  # Validação: cmo x CMO do ONS; pld x clip(CMO, piso, teto) (proxy do PLD horário da CCEE, que bloqueia download).
+  # Piso e teto estruturais homologados pela ANEEL por ano (ordem de 60 e 1.400 R$/MWh em 2025-26): conferir o valor do ano.
   pld_minimo: 61
+  pld_maximo: 1400
   pld_offset_mw: 0                        # legado somava 3.500 MW ao despacho antes de ler a pilha (compensava a base ausente)
   # Pilha térmica (merit order) SEMANAL montada dos dados: CVU da semana operativa (dataset cvu, revisão mais alta) x
   # capacidade flexível por usina (máx. geração verificada nas K semanas anteriores − inflexibilidade média, dataset

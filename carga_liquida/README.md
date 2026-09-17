@@ -137,7 +137,8 @@ manual do BALANCO_ENERGIA). Para 2026-28, `config/projecoes.yaml`.
 | hidro R | 25.001 | 25.134 | +133 | 2.545 | 10,2 % | 0,76 |
 | térmica flexível | 1.203 | 1.228 | +25 | 618 | 51 % | 0,57 (mensal ~0,8) |
 | **carga líquida** | **26.175** | **26.327** | **+152** | **2.609** | **10,0 %** | **0,76** |
-| PLD vs CMO SE (R$/MWh) | 109 | 127 | +18 | 52 | — | **0,67** |
+| CMO SE (R$/MWh): recurso marginal, 0 na sobra | 109 | 95 | −14 | 25 | 23 % | **0,71** |
+| PLD (R$/MWh): clip(CMO, piso 61, teto 1.400), obs = proxy do CMO | 139 | 127 | −12 | 21 | 15 % | **0,75** |
 | curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.441 | −510 | 1.712 | 58 % | 0,61 |
 | — só energético (ENE) | 1.618 | 1.118 | −500 | 1.103 | 68 % | 0,55 |
 
@@ -195,7 +196,11 @@ Histórico das últimas mudanças (mesma janela, mesma semente quando pareado):
    (capacidade em cheia, unidades fora, resolução diária) — ficou como diagnóstico. A/B mesma semente: FD nas horas com
    corte > 1 GW obs 16,6 GW, antes 18,1, agora 16,8; FD global viés +217 → +35, R² 0,904 → 0,910; teste pareado por dia
    neutro (o dia de sobra simulado não é o observado); ENE médio cai 1.435 → 1.130 porque a sobra total do modelo é
-   menor que a real (obs: 1,6 GW de corte + ~0,4 de FD vertida) — o gap restante é de vento extremo e térmica, não de FD. Efeito
+   menor que a real (obs: 1,6 GW de corte + ~0,4 de FD vertida) — o gap restante é de vento extremo e térmica, não de FD.
+9. Preço, igual com igual: o despacho passa a devolver `cmo` (custo marginal: 0 na sobra, VA, CVU) e `pld` = clip(cmo, piso,
+   teto). Antes o PLD simulado (piso 61) era validado contra o CMO do ONS (que vai a zero em 29 % das horas e em 164 dias
+   inteiros de 2024-26): 35 % das horas simuladas no piso vs 37 % observadas abaixo dele — a fração acertava, a métrica
+   punia. CMO × CMO: MAE 52 → 25, R² 0,67 → 0,71; PLD × clip(CMO): MAE 21, R² 0,75. Teto `pld_maximo` (1.400) novo. Efeito
    colateral esperado: nas premissas placeholder de 2027-28 (carga 97 GW em fevereiro) aparecem ~80 horas/ano de déficit
    (dia quente + vento fraco, 18–21h: térmica toda despachada, PLD no CVU máximo) — `val_erro = 1` nessas horas.
 
@@ -222,7 +227,7 @@ persistência de D 0,69/0,35/0,14 vs 0,60/0,32/0,15; std horário total por mês
 O teto só corta a cauda (0,01 % das horas): o máximo agregado observado fica em 0,55–0,87 da instalada por diversidade
 espacial, e usar essa razão seria um fator — fica a capacidade, que é o limite físico.
 
-Regimes simulados: hidro marginal 82 %, curtailment 13 %, base reduzida 1 %, extra 3 % (observado: ±50 % do patamar semanal em 78 % das horas; abaixo 16 %, concentradas 8–14h com R ≈ 15,6 GW; acima 6 %, 16–22h com R p90 38,5 GW). **Componente intradiária** (`validacao/metricas_intradiarias.csv`, desvios da média diária): PLD corr 0,53 / R² 0,28 / MAE 27; hidro R corr 0,93 / R² 0,82; térmica corr 0,33 / MAE 226 (R² −0,9: ainda pior que flat, mas era −4,4); spikes horários (> 1,5× a mediana da semana operativa, mesma definição nos dois lados; obs 3,3 % das horas, sim 1,6 %): precisão 0,16, recall 0,08 — o modelo raramente acerta *quando* o degrau ocorre. Qualquer mudança de estrutura horária deve ser julgada por estas métricas em teste pareado por dia, não pelo desvio-padrão.
+Regimes simulados: hidro marginal 82 %, curtailment 13 %, base reduzida 1 %, extra 3 % (observado: ±50 % do patamar semanal em 78 % das horas; abaixo 16 %, concentradas 8–14h com R ≈ 15,6 GW; acima 6 %, 16–22h com R p90 38,5 GW). **Componente intradiária** (`validacao/metricas_intradiarias.csv`, desvios da média diária): CMO corr 0,55 / R² 0,27 / MAE 27, PLD corr 0,58 / R² 0,32 / MAE 22; hidro R corr 0,93 / R² 0,83; térmica corr 0,37 / MAE 213 (R² −0,6: ainda pior que flat, mas era −4,4); spikes horários (CMO > 1,5× a mediana da semana operativa, mesma definição nos dois lados; obs 3,3 % das horas, sim 0,9 %): precisão 0,60, recall 0,16 — quando o modelo dá degrau ele costuma existir, mas o modelo dá poucos. Qualquer mudança de estrutura horária deve ser julgada por estas métricas em teste pareado por dia, não pelo desvio-padrão.
 
 Comparação dos modos (mesma simulação 2022-25): `valor_agua` com `fonte: pilha` (sem usar o CMO) → PLD R² 0,51, térmica R² 0,76; `exogena` → térmica R² 0,82, carga líquida viés −317, PLD R² 0,51; `residual` (legado) → térmica ≈ 0, carga líquida viés −716, PLD R² ≈ 0. O ganho de R² 0,70 vem do nível do patamar ser premissa; o modelo entrega a modulação.
 

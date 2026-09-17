@@ -136,7 +136,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                         "carga_liquida": cl_, "valor_agua": va.get("SE") if modo_va else np.nan,
                     })
                     if "pld" not in res:
-                        registros[-1]["pld"] = precos.pld(res["val_term_despacho"], ano, mes)
+                        registros[-1]["pld"] = registros[-1]["cmo"] = precos.pld(res["val_term_despacho"], ano, mes)
                 feitas += 24
             if verbose and sim == n_sim:
                 el = time.time() - t0
@@ -159,7 +159,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                                                 hidro_r=("val_gerhidro_reservatorio", "mean"), hidro_fd=("val_gerhidro_fd", "mean"),
                                                 termica_flex=("val_term_despacho", "mean"), curtailment=("curtailment", "mean"),
                                                 curtailment_ene=("curtailment_ene", "mean"), curtailment_rede=("curtailment_rede", "mean"),
-                                                pld=("pld", "mean")).round(1)
+                                                cmo=("cmo", "mean"), pld=("pld", "mean")).round(1)
         resumo.to_csv(out / "resumo_mensal.csv")
         logger.info(f"salvo em {out}")
     return df

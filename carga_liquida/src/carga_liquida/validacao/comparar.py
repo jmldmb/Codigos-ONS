@@ -5,7 +5,8 @@ cenários simulados com o observado e mede erro por componente:
 
     carga (balanço)  eólica pós-corte  solar pós-corte  hidro FD  hidro R  térmica flexível  carga líquida
     curtailment (eólica + solar centralizada: total e só o energético, vs COFF >= 2023-10)
-    e o PLD simulado contra o CMO observado (subsistema de config.carga_liquida.cmo_subsistema).
+    preço: `cmo` simulado (recurso marginal, 0 na sobra) contra o CMO observado (subsistema de
+    config.carga_liquida.cmo_subsistema) e `pld` simulado (com piso/teto) contra clip(CMO, piso, teto), proxy do PLD.
 
 Saídas em Output/validacao/: comparacao_horaria.csv, metricas.csv, metricas_por_ano_mes.csv e gráficos.
 """
@@ -32,7 +33,8 @@ COMPONENTES = [
     ("hidro_r", "R", "val_gerhidro_reservatorio"),
     ("termica_flex", "termica_flexivel", "val_term_despacho"),
     ("carga_liquida", "carga_liquida_historica", "carga_liquida"),
-    ("pld_vs_cmo", "cmo_obs", "pld"),
+    ("cmo", "cmo_obs", "cmo"),
+    ("pld", "pld_obs", "pld"),
     ("curtailment", "curtailment_obs", "curtailment_cent"),          # eólica + solar centralizada (o COFF não tem MMGD)
     ("curtailment_ene", "curtailment_ene_obs", "curtailment_ene_cent"),
 ]
@@ -52,6 +54,8 @@ def montar_comparacao() -> pd.DataFrame:
     cmo = ons.carregar_cmo()
     cmo["din_instante"] = cmo["din_instante"].dt.floor("h")
     cmo = cmo.groupby("din_instante", as_index=False)["val_cmo"].mean().rename(columns={"val_cmo": "cmo_obs"})
+    cfgm = load_config()["modelo"]
+    cmo["pld_obs"] = cmo["cmo_obs"].clip(cfgm["pld_minimo"], cfgm.get("pld_maximo", np.inf))   # proxy do PLD horário
     obs = obs.merge(ger, on="din_instante", how="left").merge(bal, on="din_instante", how="left").merge(cmo, on="din_instante", how="left")
     try:
         curt = ons.carregar_curtailment()[["din_instante", "curtailment_mw", "curtailment_ene_mw"]]
@@ -96,7 +100,7 @@ def metricas_intradiarias(df: pd.DataFrame) -> pd.DataFrame:
     Desvio-padrão parecido com o observado não é evidência — variância nas horas erradas também o aproxima."""
     d = df.copy()
     d["data"] = d["din_instante"].dt.date
-    pares = [("pld_vs_cmo", "cmo_obs", "pld"), ("hidro_r", "R", "val_gerhidro_reservatorio"),
+    pares = [("cmo", "cmo_obs", "cmo"), ("pld", "pld_obs", "pld"), ("hidro_r", "R", "val_gerhidro_reservatorio"),
              ("termica_flex", "termica_flexivel", "val_term_despacho"), ("carga_liquida", "carga_liquida_historica", "carga_liquida")]
     rows = []
     for rot, o, s in pares:
@@ -107,10 +111,10 @@ def metricas_intradiarias(df: pd.DataFrame) -> pd.DataFrame:
         e = ds - do
         rows.append({"componente": rot, "corr_intradiaria": do.corr(ds), "r2_intradiario": 1 - (e ** 2).sum() / ((do - do.mean()) ** 2).sum(),
                      "mae_intradiario": e.abs().mean(), "std_sim_obs": ds.std() / do.std()})
-    if "pld" in d and "cmo_obs" in d:                      # mesma definição dos dois lados: > 1,5x a mediana da semana operativa
+    if "cmo" in d and "cmo_obs" in d:                      # mesma definição dos dois lados: > 1,5x a mediana da semana operativa
         sem = (d["din_instante"] - pd.to_timedelta((d["din_instante"].dt.weekday + 2) % 7, unit="D")).dt.normalize()
         spk_o = d["cmo_obs"] > 1.5 * sem.map(d.groupby(sem)["cmo_obs"].median()).replace(0, np.nan)
-        spk_s = d["pld"] > 1.5 * sem.map(d.groupby(sem)["pld"].median()).replace(0, np.nan)
+        spk_s = d["cmo"] > 1.5 * sem.map(d.groupby(sem)["cmo"].median()).replace(0, np.nan)
         tp = (spk_o & spk_s).sum()
         rows.append({"componente": "spikes (CMO > 1,5x mediana semanal)", "obs_pct": 100 * spk_o.mean(), "sim_pct": 100 * spk_s.mean(),
                      "precisao": tp / max(spk_s.sum(), 1), "recall": tp / max(spk_o.sum(), 1)})
@@ -119,7 +123,8 @@ def metricas_intradiarias(df: pd.DataFrame) -> pd.DataFrame:
 
 QUANTIS = (0.1, 0.5, 0.9)
 DISTRIB = [("carga_liquida", "carga_liquida_historica", "carga_liquida"), ("curtailment_ene", "curtailment_ene_obs", "curtailment_ene_cent"),
-           ("termica_flex", "termica_flexivel", "val_term_despacho"), ("pld_vs_cmo", "cmo_obs", "pld"), ("hidro_r", "R", "val_gerhidro_reservatorio")]
+           ("termica_flex", "termica_flexivel", "val_term_despacho"), ("cmo", "cmo_obs", "cmo"), ("pld", "pld_obs", "pld"),
+           ("hidro_r", "R", "val_gerhidro_reservatorio")]
 
 
 def metricas_distribuicao(obs: pd.DataFrame) -> pd.DataFrame:
@@ -179,9 +184,9 @@ def validar():
     fig, axes = plt.subplots(4, 3, figsize=(22, 20))
     fig.suptitle("Médias mensais: observado vs simulado", fontsize=16, fontweight="bold")
     for ax, (rot, o, s) in zip(axes.flatten(), COMPONENTES):
-        ax.plot(mens["t"], mens[o], "o-", color="black", label="observado" if rot != "pld_vs_cmo" else "CMO observado")
-        ax.plot(mens["t"], mens[s], "s--", color="tab:red", label="simulado" if rot != "pld_vs_cmo" else "PLD simulado")
-        ax.set(title=rot, ylabel="R$/MWh" if rot == "pld_vs_cmo" else "MW")
+        ax.plot(mens["t"], mens[o], "o-", color="black", label="observado")
+        ax.plot(mens["t"], mens[s], "s--", color="tab:red", label="simulado")
+        ax.set(title=rot, ylabel="R$/MWh" if rot in ("cmo", "pld") else "MW")
         ax.legend()
     for ax in axes.flatten()[len(COMPONENTES):]:
         ax.axis("off")
@@ -210,12 +215,12 @@ def validar():
     fig, axes = plt.subplots(3, 4, figsize=(20, 12))
     fig.suptitle("Preço: perfil horário médio por mês (CMO observado vs PLD simulado)", fontsize=15, fontweight="bold")
     for ax, mes in zip(axes.flatten(), range(1, 13)):
-        d = df[df["mes"] == mes].groupby("hora")[["cmo_obs", "pld"]].mean()
+        d = df[df["mes"] == mes].groupby("hora")[["cmo_obs", "cmo"]].mean()
         if d.empty:
             ax.set_title(f"{MESES_PT[mes]} (sem dados)")
             continue
         ax.plot(d.index, d["cmo_obs"], color="black", lw=2, label="CMO observado")
-        ax.plot(d.index, d["pld"], color="tab:red", lw=2, ls="--", label="PLD simulado")
+        ax.plot(d.index, d["cmo"], color="tab:red", lw=2, ls="--", label="CMO simulado")
         ax.set(title=MESES_PT[mes], xlabel="hora", ylabel="R$/MWh", xticks=range(0, 24, 4))
         ax.legend(fontsize=8)
     fig.tight_layout()

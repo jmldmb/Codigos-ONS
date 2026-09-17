@@ -86,18 +86,19 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
     `va` = {subsistema: preço-base}; `pilha` = dict de arrays da semana (cvu, capacidade, minimo, subsistema).
     Base comprometida = usinas com CVU <= VA do seu subsistema, ligadas o dia inteiro (no vale solar o ONS
     rotula essas MW como "unit commitment", à noite como "ordem de mérito"; a máquina não desliga).
-    A hidro R fecha o balanço entre o mínimo e o máximo; o preço horário é o recurso marginal:
-        hidro marginal                 -> PLD = VA[SE]
-        R no máximo, ainda falta       -> térmica extra por mérito (fora da base); PLD = CVU da última chamada
+    A hidro R fecha o balanço entre o mínimo e o máximo; o preço horário é o recurso marginal (`cmo`, como o CMO do ONS):
+        hidro marginal                 -> cmo = VA[SE]
+        R no máximo, ainda falta       -> térmica extra por mérito (fora da base); cmo = CVU da última chamada
         R no mínimo, ainda sobra       -> base reduzida da mais cara para a mais barata, cada usina até o seu MÍNIMO
-                                          TÉCNICO (pilha["minimo"]); PLD = CVU da usina parcialmente reduzida
-        base toda no mínimo, sobra     -> FD reduzida (vertimento turbinável) até params_fd["reducao_sobra_mw"]; PLD = piso
-        ainda sobra                    -> curtailment em cascata; PLD = piso
+                                          TÉCNICO (pilha["minimo"]); cmo = CVU da usina parcialmente reduzida
+        base toda no mínimo, sobra     -> FD reduzida (vertimento turbinável) até params_fd["reducao_sobra_mw"]; cmo = 0
+        ainda sobra                    -> curtailment em cascata; cmo = 0
+    `pld` = clip(cmo, pld_minimo, pld_maximo) — piso e teto regulatórios.
     A usina comprometida não desliga na hora da sobra: o ONS a reduz ao mínimo e re-rotula como unit commitment
     (2025-26: térmica flexível 1,7 GW nas horas com corte energético > 1 GW; o modelo zerava). Ver README.
     """
     cfg = _cfg()
-    lim, mn, piso = cfg["limite_hidro_reservatorio"], cfg["min_hidro_reservatorio"], cfg["pld_minimo"]
+    lim, mn, piso, teto = cfg["limite_hidro_reservatorio"], cfg["min_hidro_reservatorio"], cfg["pld_minimo"], cfg.get("pld_maximo", np.inf)
     fd = lambda r: calcular_fd(mes, hora, is_weekday, r, ena, params_fd)  # noqa: E731
     cvu, cap, subs = pilha["cvu"], pilha["capacidade"], pilha["subsistema"]
     va_usina = np.array([va.get(s_, va.get("SE", 0.0)) for s_ in subs])
@@ -139,7 +140,7 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
             excesso -= fd_red                              # a FD verte antes do corte de renovável
             if excesso > 0:
                 eol, cent, dist, cortes = _curtailment_cascata(excesso, eol, cent, dist)
-            pld = piso
+            pld = 0.0                                      # sobra: custo marginal zero (o PLD fica no piso)
             regime = "curtailment" if excesso > 0 else "fd_reduzida"
     else:                                                  # hidro marginal
         R = brentq(lambda r: folga(r, termica_base), mn, lim, xtol=cfg["solver_xtol"])
@@ -153,5 +154,5 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
             "curtailment": sum(cortes), "curtailment_eolica": cortes[0], "curtailment_solar_cent": cortes[1],
             "curtailment_solar_dist": cortes[2],
             "val_gereolica_depois_corte": eol, "val_gersolar_cent_depois_corte": cent, "val_gersolar_dist_depois_corte": dist,
-            "val_gersolar_depois_corte": cent + dist, "pld": max(pld, piso), "regime": regime,
+            "val_gersolar_depois_corte": cent + dist, "cmo": pld, "pld": float(np.clip(pld, piso, teto)), "regime": regime,
             "val_erro": int(abs(balanco - carga) > cfg["balance_tolerance"])}  # em "extra", erro = déficit sem capacidade
