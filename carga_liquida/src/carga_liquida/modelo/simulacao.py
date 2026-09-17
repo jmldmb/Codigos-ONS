@@ -71,14 +71,17 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
         ano, mes = int(r.ano), int(r.mes)
         temp_mes = _temperatura_mensal(ano, mes, clim, temp_mensal)
         n_dias = calendar.monthrange(ano, mes)[1]
+        dias = [date(ano, mes, dia) for dia in range(1, n_dias + 1)]
+        temps = {dia: temperatura.temperaturas_dia(ano, mes, dia) if clim else None for dia in range(1, n_dias + 1)}
+        carga_mes = s_carga.gerar_dias(dias, r.carga, temp_mes, temps)      # determinístico: uma vez por mês
         for sim in range(1, n_sim + 1):
             eol_mes = s_eol.gerar_mes(mes, r.eolica, n_dias, rng, teto=float(r.eolica_capacidade))
             cent_mes, dist_mes = s_cent.gerar_mes(mes, r.solar_centralizada, n_dias, rng), s_dist.gerar_mes(mes, r.solar_distribuida, n_dias, rng)
             for dia in range(1, n_dias + 1):
                 d = date(ano, mes, dia)
                 tipo = feriados.tipo_dia(d)
-                temp_h = temperatura.temperaturas_dia(ano, mes, dia) if clim else None
-                carga = s_carga.gerar_dia(d, r.carga, temp_mes, temp_h)
+                temp_h = temps[dia]
+                carga = carga_mes[dia - 1]
                 eol, cent, dist = eol_mes[dia - 1], cent_mes[dia - 1], dist_mes[dia - 1]
                 if s_rede is not None:                     # corte de rede (CNF/REL) sai antes do despacho
                     rede_eol = s_rede.gerar_dia("eolica", mes, r.curtailment_rede_eolica, eol)

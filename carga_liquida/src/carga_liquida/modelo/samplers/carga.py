@@ -1,16 +1,20 @@
 """Sampler de carga v6 (determinístico, sensível à temperatura), como no mini_dessem.
 
     carga_norm(h) = intercept[tipo_dia, mês, h] + slope[tipo_dia, mês, h] · temp(h)
-    perfil(h)     = carga_norm(h) · 24 / Σ carga_norm            (constraint Σ perfil = 24)
-    carga(h)      = carga_dia(tipo_dia) · perfil(h)              (média do perfil = 1)
+    carga(h)      = carga_dia(classe) · carga_norm(h)             Σ_h carga_norm = 24 na temperatura de referência do mês
 
-onde carga_dia distribui a média mensal entre dias úteis (DU) e fins de semana/feriados (FDS) pelo
-fator FDS/DU do mês e pelo calendário real. temp(h) é a temperatura real hora a hora quando existe
-(histórico) ou média mensal + desvio típico da hora (projeção).
+onde carga_dia distribui a média mensal entre as classes de nível {SEG, DU (ter–sex), SAB, DOM + feriado}
+pelas proporções do mês e pelo calendário real, e a temperatura move o NÍVEL do dia além da forma:
+Σ carga_norm/24 = 1 + Σ slope·(temp − temp_ref)/24 (observado: +1,35 % por °C, corr 0,58 nos dias úteis).
+A média do MÊS é renormalizada à premissa em `gerar_dias`. O legado renormalizava cada dia (Σ perfil = 24 na
+temperatura real), e com isso um dia 3 °C acima da média do mês tinha a mesma média que um 3 °C abaixo — o
+std do nível diário simulado era 0,005 contra 0,033 observado. temp(h) é a temperatura real hora a hora
+quando existe (histórico) ou média mensal + desvio típico da hora (projeção; sem variabilidade diária).
 
 Treino: regressão linear por (tipo_dia, mês, hora) da carga normalizada pela média mensal contra a
 temperatura; intercepts reescalados para Σ=24 na temperatura típica; depois um ajuste de viés por
 (tipo_dia, hora) a partir do backtest in-sample (legado: ajustar_vies_picos_v6), reaplicando o constraint.
+Testes de coerência: `python run.py validar --perfis`.
 """
 import calendar
 from datetime import date, datetime
@@ -42,6 +46,7 @@ def base_treino() -> pd.DataFrame:
                                                    df["din_instante"].dt.day, df["din_instante"].dt.hour)
     df["data"] = df["din_instante"].dt.date
     df["tipo_dia"] = df["data"].map(feriados.tipo_dia)
+    df["classe"] = df["data"].map(feriados.classe_dia)
     df["carga_media_mes"] = df.groupby(["ano", "mes"])["carga_mw"].transform("mean")
     df["carga_norm"] = df["carga_mw"] / df["carga_media_mes"]
     return df
@@ -89,12 +94,17 @@ def _aplicar_constraint(reg: dict, desvio: dict, temp_ref: dict) -> dict:
 
 
 def _proporcoes(df: pd.DataFrame) -> dict:
+    """Nível relativo de cada classe de dia por mês (DU = ter–sex = 1), na média do dia / média do mês.
+    Feriado (FER) tem poucos dias por mês: usa a razão agregada de todos os meses."""
     out = {}
+    fer = df.loc[df["classe"] == "FER", "carga_norm"].mean() / df.loc[df["classe"] == "DU", "carga_norm"].mean()
     for mes in range(1, 13):
         d = df[df["mes"] == mes]
-        du = d.loc[d["tipo_dia"] == "DU", "carga_mw"].mean()
-        fds = d.loc[d["tipo_dia"] == "FDS", "carga_mw"].mean()
-        out[mes] = {"DU": 1.0, "FDS": float(fds / du) if du and not np.isnan(fds) else 0.88}
+        ref = d.loc[d["classe"] == "DU", "carga_norm"].mean()
+        out[mes] = {"FER": float(fer) if not np.isnan(fer) else 0.90}
+        for c in ("SEG", "DU", "SAB", "DOM"):
+            v = d.loc[d["classe"] == c, "carga_norm"].mean()
+            out[mes][c] = float(v / ref) if ref and not np.isnan(v) else {"SEG": 0.98, "DU": 1.0, "SAB": 0.92, "DOM": 0.85}[c]
     return out
 
 
@@ -106,17 +116,18 @@ def _params_para_json(reg, desvio, temp_ref, prop):
 
 
 def _backtest(sampler: "CargaSampler", df: pd.DataFrame) -> pd.DataFrame:
-    """Simula cada dia da base com temperatura real e média mensal real; devolve erro por hora."""
+    """Simula cada mês da base com temperatura real e média mensal real (dias renormalizados ao mês); erro por hora."""
     rows = []
-    for (ano, mes, dia), g in df.groupby(["ano", "mes", "dia"]):
-        if len(g) < 24:
+    for (ano, mes), gm in df.groupby(["ano", "mes"]):
+        dias = [date(int(ano), int(mes), int(d)) for d, g in gm.groupby("dia") if len(g) == 24]
+        if not dias:
             continue
-        temp_h = dict(zip(g["hora"], g["temp_brasil_c"]))
-        sim = sampler.gerar_dia(date(int(ano), int(mes), int(dia)), float(g["carga_media_mes"].iloc[0]),
-                                float(g["temp_brasil_c"].mean()), temp_h)
-        real = g.sort_values("hora")["carga_mw"].values
-        rows.append(pd.DataFrame({"ano": ano, "mes": mes, "dia": dia, "hora": range(24), "tipo_dia": g["tipo_dia"].iloc[0],
-                                  "real": real, "sim": sim}))
+        temps = {d.day: dict(zip(gm.loc[gm["dia"] == d.day, "hora"], gm.loc[gm["dia"] == d.day, "temp_brasil_c"])) for d in dias}
+        sim = sampler.gerar_dias(dias, float(gm["carga_media_mes"].iloc[0]), float(gm["temp_brasil_c"].mean()), temps)
+        for d, s in zip(dias, sim):
+            g = gm[gm["dia"] == d.day].sort_values("hora")
+            rows.append(pd.DataFrame({"ano": ano, "mes": mes, "dia": d.day, "hora": range(24), "tipo_dia": g["tipo_dia"].iloc[0],
+                                      "real": g["carga_mw"].values, "sim": s}))
     bt = pd.concat(rows, ignore_index=True)
     bt["erro"] = bt["sim"] - bt["real"]
     bt["erro_pct"] = 100 * bt["erro"] / bt["real"]
@@ -140,7 +151,8 @@ def treinar() -> dict:
     reg = _aplicar_constraint(reg, desvio, temp_ref)
     prop = _proporcoes(df)
     r2 = np.mean([v["r2"] for v in reg.values() if v["n"] > 0])
-    logger.info(f"regressões: {len(reg)} (R² médio {r2:.3f}); fator FDS/DU médio {np.mean([p['FDS'] for p in prop.values()]):.3f}")
+    logger.info(f"regressões: {len(reg)} (R² médio {r2:.3f}); níveis médios por classe: "
+                + ", ".join(f"{c} {np.mean([p[c] for p in prop.values()]):.3f}" for c in feriados.CLASSES))
 
     params = _params_para_json(reg, desvio, temp_ref, prop)
     antes = _metricas(bt := _backtest(CargaSampler(params), df))
@@ -170,19 +182,20 @@ class CargaSampler:
         self.temp_ref = {int(m): v for m, v in p["temp_ref"].items()}
         self.prop = {int(m): v for m, v in p["proporcoes"].items()}
 
-    def carga_dia(self, d: date, carga_mensal: float, tipo: str) -> float:
-        """Média do dia dado o tipo, respeitando a média mensal no calendário real do mês."""
-        n = {"DU": 0, "FDS": 0}
+    def carga_dia(self, d: date, carga_mensal: float, classe: str) -> float:
+        """Média do dia dada a classe de nível, respeitando a média mensal no calendário real do mês."""
+        n = {c: 0 for c in feriados.CLASSES}
         for dia in range(1, calendar.monthrange(d.year, d.month)[1] + 1):
-            n[feriados.tipo_dia(date(d.year, d.month, dia))] += 1
+            n[feriados.classe_dia(date(d.year, d.month, dia))] += 1
         f = self.prop[d.month]
-        den = n["DU"] * f["DU"] + n["FDS"] * f["FDS"]
-        base = carga_mensal * (n["DU"] + n["FDS"]) / den if den > 0 else carga_mensal
-        return base * f[tipo]
+        den = sum(n[c] * f[c] for c in feriados.CLASSES)
+        base = carga_mensal * sum(n.values()) / den if den > 0 else carga_mensal
+        return base * f[classe]
 
     def gerar_dia(self, d: date, carga_mensal: float, temp_media_mensal: float,
                   temp_horaria: dict[int, float] | None = None) -> np.ndarray:
-        """24 valores de carga (MW) do dia `d`."""
+        """24 valores de carga (MW) do dia `d`; a temperatura move nível e forma (média do dia ≠ carga_dia quando a
+        temperatura do dia difere da de referência do mês). Para respeitar a média do mês use `gerar_dias`."""
         if isinstance(d, datetime):
             d = d.date()
         mes, tipo = d.month, feriados.tipo_dia(d)
@@ -191,5 +204,12 @@ class CargaSampler:
         else:
             temp_h = temp_media_mensal + np.array(self.desvio.get(mes, [0.0] * 24))
         norm = np.array([self.reg[(tipo, mes, h)]["intercept"] + self.reg[(tipo, mes, h)]["slope"] * temp_h[h] for h in range(24)])
-        perfil = norm * 24 / norm.sum() if norm.sum() > 0 else np.ones(24)
-        return self.carga_dia(d, carga_mensal, tipo) * perfil
+        norm = np.maximum(norm, 0.0)
+        return self.carga_dia(d, carga_mensal, feriados.classe_dia(d)) * norm
+
+    def gerar_dias(self, dias: list[date], carga_mensal: float, temp_media_mensal: float,
+                   temps: dict[int, dict[int, float] | None] | None = None) -> np.ndarray:
+        """Matriz (n_dias, 24) para os dias de um mês, renormalizada para média = carga_mensal.
+        `temps[dia] = {hora: temp}` ou None (projeção: média mensal + desvio típico)."""
+        y = np.array([self.gerar_dia(d, carga_mensal, temp_media_mensal, (temps or {}).get(d.day)) for d in dias])
+        return y * (carga_mensal / y.mean()) if y.mean() > 0 else y

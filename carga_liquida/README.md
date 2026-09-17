@@ -111,7 +111,7 @@ Mesma identidade nos dois lados: **observado** `R + térmica_flex` ≡ **simulad
 
 | Bloco | Premissa (herdada do mini_dessem) | Treino / fonte |
 |---|---|---|
-| Carga v6 | `carga_norm(h) = a[tipo,mês,h] + b[tipo,mês,h]·temp(h)`, Σ=24, DU vs FDS (fim de semana + feriado), ajuste de viés por hora | balanço SIN + temperatura; MAPE 3,9 %, R² 0,87 |
+| Carga v6 | `carga(h) = carga_dia(classe) · [a[tipo,mês,h] + b[tipo,mês,h]·temp(h)]`, Σ=24 na temperatura de referência do mês (a temperatura move o **nível** do dia: +1,1 %/°C simulado, +1,35 observado); nível por classe {seg 1,02 · ter–sex 1,04 · sáb 0,96 · dom 0,88 · feriado 0,93}; forma por DU/FDS; ajuste de viés por hora; renormalização no mês. O legado renormalizava cada dia (std do nível diário 0,005 vs 0,033 observado) e tinha só DU/FDS (sáb = dom) | balanço SIN + temperatura; MAPE 2,8 %, R² 0,92 |
 | Eólica | `Y_{d,h} = M · [p_h(mês) + (D_d − 1) + Z_{d,h}]`: perfil normalizado por mês + **fator diário D** (cópula gaussiana AR(1) sobre a distribuição empírica de média do dia / média do mês: std 0,13 set → 0,40 fev, P10/P90 0,5/1,5 no verão, ρ dia a dia 0,4–0,8; constante no dia com transição de ±3 h na meia-noite) + ruído AR(1) horário (φ≈0,9, σ≈0,05–0,09, média móvel de 24 h removida); média do **mês** = premissa. O nível do dia é **aditivo**: a amplitude diurna em MW não depende de quanto ventou (perfil por tercil de D é o mesmo deslocado; multiplicar estourava a capacidade: 43,8 GW vs 29,5 observados). O legado renormalizava cada dia (D ≡ 1) e estimava φ/σ nos perfis médios mês a mês (σ ≈ 0,02). Teto físico horário = capacidade instalada (`eolica_teto_capacidade`; cadastro ONS `capacidade` no histórico, `eolica_capacidade_mw` em projeções). Testes de coerência: `python run.py validar --perfis` | potencial COFF (geração + corte), 2023-10+; cadastro de unidades geradoras |
 | Solar | perfil determinístico por mês; centralizada (expoente 1,5) e distribuída (1,0); fator diário opcional (`solar_fator_diario`, std de D 0,06–0,16: segunda ordem) | COFF FV / geração usina não-MMGD; MMGD |
 | Curtailment de rede (`curtailment_rede: true`) | **premissa mensal exógena** (CNF/REL do COFF: restrições regionais de transmissão, quase todo NE, que ocorrem mesmo com o SIN precisando da energia): histórico = observado; projeção em `projecoes.yaml`. Alocado por hora pelo perfil observado (mês × hora; pica às 7–9h, ~20 % do potencial eólico vs ~6 % de madrugada), limitado ao potencial, e subtraído da eólica e da solar centralizada **antes** do despacho. O corte energético (ENE) continua endógeno | COFF 2023-10+ |
@@ -129,16 +129,16 @@ manual do BALANCO_ENERGIA). Para 2026-28, `config/projecoes.yaml`.
 
 | componente | obs (MW) | sim (MW) | viés | MAE | MAE/média | R² |
 |---|---|---|---|---|---|---|
-| carga | 76.359 | 76.355 | −4 | 2.832 | 3,7 % | 0,87 |
-| eólica pós-corte | 11.480 | 11.417 | −64 | 2.389 | 20,8 % | 0,60 |
+| carga | 76.359 | 76.348 | −11 | 2.194 | 2,9 % | 0,92 |
+| eólica pós-corte | 11.480 | 11.402 | −79 | 2.332 | 20,3 % | 0,63 |
 | solar pós-corte | 7.002 | 6.923 | −79 | 752 | 10,7 % | 0,98 |
-| hidro FD | 24.089 | 24.085 | −3 | 1.837 | 7,6 % | 0,90 |
-| hidro R | 25.001 | 25.213 | +211 | 2.724 | 10,9 % | 0,73 |
-| térmica flexível | 1.203 | 1.247 | +44 | 631 | 53 % | 0,56 (mensal ~0,8) |
-| **carga líquida** | **26.175** | **26.424** | **+249** | **2.807** | **10,7 %** | **0,73** |
+| hidro FD | 24.089 | 24.092 | +3 | 1.779 | 7,4 % | 0,91 |
+| hidro R | 25.001 | 25.225 | +224 | 2.606 | 10,4 % | 0,75 |
+| térmica flexível | 1.203 | 1.247 | +44 | 629 | 52 % | 0,56 (mensal ~0,8) |
+| **carga líquida** | **26.175** | **26.437** | **+262** | **2.675** | **10,2 %** | **0,75** |
 | PLD vs CMO SE (R$/MWh) | 109 | 129 | +20 | 52 | — | **0,67** |
-| curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.552 | −399 | 1.724 | 58 % | 0,61 |
-| — só energético (ENE) | 1.618 | 1.229 | −389 | 1.149 | 71 % | 0,54 |
+| curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.579 | −372 | 1.714 | 58 % | 0,61 |
+| — só energético (ENE) | 1.618 | 1.256 | −362 | 1.105 | 68 % | 0,56 |
 
 **Distribuição por mês** (`validacao/distribuicao_mensal.csv`: quantis das horas observadas vs das horas simuladas de
 todos os cenários — critério para mudanças de *variabilidade*, onde a média dos cenários não conta): carga líquida
@@ -159,6 +159,13 @@ Histórico das últimas mudanças (mesma janela, mesma semente quando pareado):
    pareadas hora a hora pioram um pouco (eólica MAE 2.244 → 2.417, carga líquida R² 0,742 → 0,728) porque a média de
    6 cenários agora carrega o ruído do fator diário (std/√6) — a média populacional não muda; a distribuição diária,
    que era errada (todo dia = média do mês), passa a bater. Aceito pelo critério de distribuição.
+4. Nível diário da carga (temperatura move o nível; classes seg/ter–sex/sáb/dom/feriado): carga MAE 2.832 → 2.194
+   (R² 0,87 → 0,92), carga líquida MAE 2.770 → 2.675 (R² 0,735 → 0,752), ENE 1.223 → 1.256, spikes precisão 0,15 → 0,23
+   e recall 0,06 → 0,10. Bateria de testes da carga (`validar --perfis`, obs vs sim 2024-26): std do nível diário DU
+   0,033 vs 0,019 (era 0,005), FDS 0,049 vs 0,039 (era 0,012); nível por classe seg 1,020/1,020, ter–sex 1,040/1,041,
+   sáb 0,957/0,957, dom 0,884/0,881, feriado 0,927/0,923 (antes sáb = dom = feriado = 0,919); nível vs temperatura
+   +1,35 %/°C vs +1,07 (era 0 por construção); forma, rampas e meia-noite já batiam. Resíduo horário: std 4,6 % → 3,7 %,
+   MAPE 3,6 % → 2,8 %, ainda com autocorrelação 0,93/0,54 (1 h / 24 h) — o que falta no nível diário não é temperatura.
 
 Por que o mínimo técnico e não "reduzir até zero" (2025-26, horas com corte energético > 1 GW = 25 % das horas):
 a inflexibilidade fica onde está (4,8 GW), a ordem de mérito cai de 1,95 para 1,09 GW e o **unit commitment sobe de

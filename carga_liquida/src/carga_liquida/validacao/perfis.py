@@ -1,12 +1,16 @@
-"""Testes de coerência dos perfis diários eólicos simulados contra o potencial observado (COFF).
+"""Testes de coerência dos perfis diários simulados (eólica e carga) contra o observado.
 
     python run.py validar --perfis
 
-Gera, com o sampler treinado, os mesmos meses observados (média do mês = observada, 6 cenários) e compara nove
+Eólica: gera, com o sampler treinado, os mesmos meses observados (média do mês = observada, 6 cenários) e compara nove
 estatísticas que a validação hora a hora não vê: forma média do dia, forma condicional ao nível do dia, rampas,
 salto na meia-noite, limites, autocorrelação intradiária, persistência de D, distribuição de D e variância total.
 Foi isto que mostrou que o nível do dia é aditivo (amplitude do perfil por tercil de D) e que o degrau de D à
 meia-noite e a demédia por dia-calendário criavam saltos 5x maiores que o observado.
+Carga: compara a última simulação (determinística) com o balanço: forma por tipo de dia, std do nível diário, nível por
+classe de dia, nível vs temperatura do dia, forma por tercil de temperatura, rampas, meia-noite e o resíduo. Foi isto
+que mostrou que a temperatura não movia o nível do dia (Σ perfil = 24 renormalizado no dia) e que sábado, domingo e
+feriado tinham o mesmo nível.
 """
 import calendar
 
@@ -14,7 +18,8 @@ import numpy as np
 import pandas as pd
 
 from ..config import get_logger
-from ..dados import ons
+from ..dados import ons, temperatura
+from ..modelo import feriados, simulacao
 from ..modelo.samplers.eolica import EolicaSampler
 
 logger = get_logger("perfis")
@@ -82,4 +87,71 @@ def testar_eolica(inicio: str = "2024-01-01", n_cen: int = 6, seed: int = 7) -> 
     out = pd.DataFrame(linhas).groupby(["teste", "estatistica"], sort=False).agg(obs=("obs", "max"), sim=("sim", "max")).reset_index()
     for r in out.itertuples():
         logger.info(f"  {r.teste:<44} {r.estatistica:<28} obs {r.obs:10.3f}   sim {r.sim:10.3f}")
+    return out
+
+
+def testar_carga(inicio: str = "2024-01-01") -> pd.DataFrame:
+    """Carga observada (balanço + exportação) vs último cenário simulado, mesma bateria de nível/forma."""
+    bal = ons.carregar_balanco()
+    bal = bal[bal["din_instante"] >= inicio]
+    o = pd.DataFrame({"din_instante": bal["din_instante"], "y": bal["val_carga"] + bal["val_intercambio"].fillna(0.0)})
+    sim = simulacao.carregar_resultados()
+    s = sim[(sim["simulacao"] == 1) & (sim["din_instante"] >= inicio)][["din_instante", "val_carga"]].rename(columns={"val_carga": "y"})
+    t = temperatura.carregar_temperatura().rename(columns={"timestamp": "din_instante"})[["din_instante", "temp_brasil_c"]]
+
+    def prep(d):
+        d = d.merge(t, on="din_instante", how="left").sort_values("din_instante").copy()
+        d["dia"], d["hora"] = d["din_instante"].dt.normalize(), d["din_instante"].dt.hour
+        d["ym"], d["dow"] = d["din_instante"].dt.to_period("M"), d["din_instante"].dt.dayofweek
+        d["tipo"] = d["dia"].dt.date.map(feriados.tipo_dia)
+        d["classe"] = d["dia"].dt.date.map(feriados.classe_dia)
+        d["dm"], d["mm"] = d.groupby("dia")["y"].transform("mean"), d.groupby("ym")["y"].transform("mean")
+        d["D"], d["f"], d["tm"] = d["dm"] / d["mm"], d["y"] / d["dm"], d.groupby("dia")["temp_brasil_c"].transform("mean")
+        return d
+
+    o, s = prep(o), prep(s)
+    comum = set(o["dia"]) & set(s["dia"])
+    o, s = o[o["dia"].isin(comum)], s[s["dia"].isin(comum)]
+    linhas = []
+
+    def add(teste, nome, lab, v):
+        linhas.append({"teste": teste, "estatistica": nome, "obs": v if lab == "obs" else np.nan, "sim": v if lab == "sim" else np.nan})
+
+    for tp in ("DU", "FDS"):
+        add("1 forma média do dia", f"MAE por hora, {tp}", "sim",
+            float(np.abs(o[o["tipo"] == tp].groupby("hora")["f"].mean() - s[s["tipo"] == tp].groupby("hora")["f"].mean()).mean()))
+    for lab, d in (("obs", o), ("sim", s)):
+        g = d.groupby("dia").agg(D=("D", "first"), tipo=("tipo", "first"), classe=("classe", "first"), tm=("tm", "first"), ym=("ym", "first"))
+        for tp in ("DU", "FDS"):
+            x = g[g["tipo"] == tp]["D"]
+            for nome, v in (("std", x.std()), ("P10", x.quantile(.1)), ("P90", x.quantile(.9))):
+                add("2 nível diário D", f"{nome}, {tp}", lab, v)
+        for c in feriados.CLASSES:
+            add("3 nível por classe de dia", c, lab, g[g["classe"] == c]["D"].mean())
+        du = g[g["classe"].isin(["DU", "SEG"])].copy()
+        du["dt"] = du["tm"] - du.groupby("ym")["tm"].transform("mean")
+        du = du.dropna()
+        add("4 nível vs temperatura (dias úteis)", "corr", lab, du["dt"].corr(du["D"]))
+        add("4 nível vs temperatura (dias úteis)", "% por °C", lab, 100 * np.polyfit(du["dt"], du["D"], 1)[0])
+        dd = d[d["tipo"] == "DU"].copy()
+        dd["dt"] = dd["tm"] - dd.groupby("ym")["tm"].transform("mean")
+        gd = dd.groupby("dia").agg(dt=("dt", "first"), amp=("f", lambda x: x.max() / x.min())).dropna()
+        gd["terc"] = pd.qcut(gd["dt"], 3, labels=["frio", "médio", "quente"])
+        for terc, v in gd.groupby("terc", observed=True)["amp"].median().items():
+            add("5 amplitude do perfil por tercil de temperatura", terc, lab, v)
+        r = (d.groupby("dia")["y"].diff() / d["mm"]).dropna()
+        add("6 rampas (fração da média do mês)", "std", lab, r.std())
+        add("6 rampas (fração da média do mês)", "P99", lab, r.quantile(.99))
+        dy = (d["y"] - d["y"].shift(1)).abs() / d["mm"]
+        add("7 salto entre horas vizinhas", "meia-noite", lab, dy[d["hora"] == 0].median())
+        add("7 salto entre horas vizinhas", "outras horas", lab, dy[d["hora"] != 0].median())
+    m = o[["din_instante", "y", "mm"]].merge(s[["din_instante", "y"]], on="din_instante", suffixes=("_o", "_s"))
+    e = ((m["y_s"] - m["y_o"]) / m["mm"]).values
+    add("8 resíduo horário sim − obs", "std", "sim", e.std())
+    add("8 resíduo horário sim − obs", "autocorr 1 h", "sim", np.corrcoef(e[:-1], e[1:])[0, 1])
+    add("8 resíduo horário sim − obs", "autocorr 24 h", "sim", np.corrcoef(e[:-24], e[24:])[0, 1])
+    add("8 resíduo horário sim − obs", "MAPE %", "sim", 100 * np.abs(m["y_s"] - m["y_o"]).mean() / m["y_o"].mean())
+    out = pd.DataFrame(linhas).groupby(["teste", "estatistica"], sort=False).agg(obs=("obs", "max"), sim=("sim", "max")).reset_index()
+    for r in out.itertuples():
+        logger.info(f"  {r.teste:<46} {r.estatistica:<16} obs {r.obs:9.3f}   sim {r.sim:9.3f}")
     return out

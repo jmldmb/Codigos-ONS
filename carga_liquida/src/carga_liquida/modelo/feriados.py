@@ -38,6 +38,18 @@ def eh_feriado(d: date) -> bool:
     return d in feriados_nacionais(d.year)
 
 
+CLASSES = ("SEG", "DU", "SAB", "DOM", "FER")
+
+
+def classe_dia(d: date) -> str:
+    """Classe de NÍVEL da carga: SEG (segunda), DU (terça a sexta), SAB (sábado), DOM (domingo), FER (feriado nacional).
+    Observado 2024-26 (média do dia / média do mês): seg 1,016, ter-sex 1,037, sáb 0,956, dom 0,883, feriado 0,938 —
+    DU/FDS colocava sábado, domingo e feriado no mesmo 0,919. A FORMA do dia continua por tipo_dia (DU/FDS)."""
+    if eh_feriado(d):
+        return "FER"
+    return {0: "SEG", 5: "SAB", 6: "DOM"}.get(d.weekday(), "DU")
+
+
 def tipo_dia(d: date) -> str:
     """'DU' (segunda a sexta não feriado) ou 'FDS' (sábado, domingo, feriado nacional)."""
     return "FDS" if d.weekday() >= 5 or eh_feriado(d) else "DU"
