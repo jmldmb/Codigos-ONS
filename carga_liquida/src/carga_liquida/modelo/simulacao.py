@@ -91,6 +91,7 @@ def simular(anos=None, meses=None, num_simulacoes: int | None = None, seed: int 
                         continue
                     p = pilha_termica.pilha_semana(d)
                     pilha_arr = {"cvu": p["cvu"].values.astype(float), "capacidade": p["capacidade"].values.astype(float),
+                                 "minimo": p["minimo"].values.astype(float) if cfg["pilha_minimo_quantil"] > 0 else np.zeros(len(p)),
                                  "subsistema": p["subsistema"].values}
                 else:
                     base = s_term.gerar_dia(mes, tipo, float(r.termica_flex_base))

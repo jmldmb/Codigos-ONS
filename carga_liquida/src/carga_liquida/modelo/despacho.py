@@ -83,14 +83,17 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
                  mes: int, hora: int, is_weekday: bool, va: dict, pilha, params_fd: dict | None = None) -> dict | None:
     """Despacho com valor da água (modo `termica_flexivel: valor_agua`), como DECOMP -> DESSEM.
 
-    `va` = {subsistema: preço-base}; `pilha` = dict de arrays da semana (cvu, capacidade, subsistema).
+    `va` = {subsistema: preço-base}; `pilha` = dict de arrays da semana (cvu, capacidade, minimo, subsistema).
     Base comprometida = usinas com CVU <= VA do seu subsistema, ligadas o dia inteiro (no vale solar o ONS
     rotula essas MW como "unit commitment", à noite como "ordem de mérito"; a máquina não desliga).
     A hidro R fecha o balanço entre o mínimo e o máximo; o preço horário é o recurso marginal:
         hidro marginal                 -> PLD = VA[SE]
         R no máximo, ainda falta       -> térmica extra por mérito (fora da base); PLD = CVU da última chamada
-        R no mínimo, ainda sobra       -> base reduzida da mais cara para a mais barata; PLD = CVU da última reduzida
-        sobra sem térmica base         -> curtailment em cascata; PLD = piso
+        R no mínimo, ainda sobra       -> base reduzida da mais cara para a mais barata, cada usina até o seu MÍNIMO
+                                          TÉCNICO (pilha["minimo"]); PLD = CVU da usina parcialmente reduzida
+        base toda no mínimo, sobra     -> curtailment em cascata; PLD = piso
+    A usina comprometida não desliga na hora da sobra: o ONS a reduz ao mínimo e re-rotula como unit commitment
+    (2025-26: térmica flexível 1,7 GW nas horas com corte energético > 1 GW; o modelo zerava). Ver README.
     """
     cfg = _cfg()
     lim, mn, piso = cfg["limite_hidro_reservatorio"], cfg["min_hidro_reservatorio"], cfg["pld_minimo"]
@@ -100,6 +103,7 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
     na_base = cvu <= va_usina
     base_cheia = float(cap[na_base].sum())
     cvu_base, cap_base = cvu[na_base], cap[na_base]          # ordenados por CVU (pilha já vem ordenada)
+    red_base = np.maximum(cap_base - pilha.get("minimo", np.zeros_like(cap))[na_base], 0.0)  # redutível até o mínimo técnico
     cvu_fora, cap_fora = cvu[~na_base], cap[~na_base]
     va_se = float(va.get("SE", 0.0))
 
@@ -116,17 +120,19 @@ def despachar_va(carga: float, eolica: float, solar_cent: float, solar_dist: flo
         j = int(np.searchsorted(acum, termica_extra, side="left")) if termica_extra > 0 else -1
         pld = float(cvu_fora[min(j, len(cvu_fora) - 1)]) if j >= 0 else va_se
         regime = "extra"
-    elif folga(mn, termica_base) < 0:                      # R no mínimo, sobra -> reduz base (cara -> barata), depois corta
+    elif folga(mn, termica_base) < 0:                      # R no mínimo, sobra -> reduz base (cara -> barata) até o mínimo, depois corta
         R = mn
         sobra = -folga(R, termica_base)
-        termica_base = max(base_cheia - sobra, 0.0)
-        if termica_base > 0:
-            acum = np.cumsum(cap_base)                     # a última usina que ainda roda define o preço
-            j = int(np.searchsorted(acum, termica_base, side="left"))
-            pld = float(cvu_base[min(j, len(cvu_base) - 1)])
+        reduzivel = float(red_base.sum())
+        if sobra < reduzivel:
+            termica_base = base_cheia - sobra
+            acum = np.cumsum(red_base[::-1])               # da mais cara para a mais barata: a parcialmente reduzida faz o preço
+            j = int(np.searchsorted(acum, sobra, side="right"))
+            pld = float(cvu_base[::-1][min(j, len(cvu_base) - 1)])
             regime = "base_reduzida"
         else:
-            excesso = -folga(R, 0.0)
+            termica_base = base_cheia - reduzivel           # toda a base no mínimo técnico
+            excesso = -folga(R, termica_base)
             eol, cent, dist, cortes = _curtailment_cascata(excesso, eol, cent, dist)
             pld = piso
             regime = "curtailment"

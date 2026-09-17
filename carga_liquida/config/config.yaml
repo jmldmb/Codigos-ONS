@@ -187,6 +187,9 @@ modelo:
   # Alternativamente, um xlsx com aba 'pilha_term' (potencia acumulada MW, cvu R$/MWh) em pilha_termica_xlsx substitui tudo.
   pilha_capacidade_semanas: 52            # K: janela do máximo gerado (≈ 12 meses)
   pilha_min_flex_mw: 10                   # usina entra na pilha se capacidade flexível (pmax − inflexibilidade média) >= isto
+  # Mínimo técnico da usina comprometida = quantil da geração flexível nas horas ligadas sem rampa (mediana das K semanas).
+  # Na sobra, a base reduz até este piso e só depois corta renovável. 0 -> reduz até zero (comportamento antigo).
+  pilha_minimo_quantil: 0.10
   pilha_termica_xlsx: null
   # Simulação
   num_simulacoes: 6                       # cenários (meses completos) por mês/ano

@@ -116,9 +116,9 @@ Mesma identidade nos dois lados: **observado** `R + térmica_flex` ≡ **simulad
 | Curtailment de rede (`curtailment_rede: true`) | **premissa mensal exógena** (CNF/REL do COFF: restrições regionais de transmissão, quase todo NE, que ocorrem mesmo com o SIN precisando da energia): histórico = observado; projeção em `projecoes.yaml`. Alocado por hora pelo perfil observado (mês × hora; pica às 7–9h, ~20 % do potencial eólico vs ~6 % de madrugada), limitado ao potencial, e subtraído da eólica e da solar centralizada **antes** do despacho. O corte energético (ENE) continua endógeno | COFF 2023-10+ |
 | Hidro FD | `FD = c + ghr[hora]·R − 8·(R/GW)² + 0,09·ENA + mês + hora + FDS` — a resposta ao R varia com a hora (0,91 ao meio-dia, 0,76 às 19h) e satura (marginal ≈ 0,45 em R = 20 GW, 0,2 em 35 GW); legado: ghr único 0,33 | histórico FD/R + ENA diária; MAE 1,77 GW, R² 0,91 |
 | Valor da água (`termica_flexivel: valor_agua`, padrão) | **premissa = preço-base semanal por subsistema** (papel do DECOMP): histórico = mediana semanal do CMO de cada subsistema (`valor_agua_fonte: cmo`) ou CVU da pilha na térmica de mérito observada (`pilha`); projeção em `projecoes.yaml` (número ou por subsistema; ou derivado da térmica base pela pilha). Base **comprometida** da semana = usinas com CVU ≤ VA do seu subsistema, ligadas o dia inteiro | CMO / térmica observada |
-| Despacho (`despachar_va`, papel do DESSEM) | hidro R fecha o balanço entre 14,5 e 42 GW; R no máximo → térmica extra por mérito; R no mínimo → base reduzida da mais cara para a mais barata, depois curtailment (eólica + solar cent. pro rata, por fim MMGD). **PLD horário = recurso marginal**: VA · CVU da extra · CVU da última reduzida · piso | — |
+| Despacho (`despachar_va`, papel do DESSEM) | hidro R fecha o balanço entre 14,5 e 42 GW; R no máximo → térmica extra por mérito; R no mínimo → base reduzida da mais cara para a mais barata **até o mínimo técnico de cada usina**, depois curtailment (eólica + solar cent. pro rata, por fim MMGD). **PLD horário = recurso marginal**: VA · CVU da extra · CVU da parcialmente reduzida · piso | — |
 | Alternativas | `exogena`: térmica base mensal como premissa (MW), perfil horário observado ou flat; `residual`: legado (térmica só na saturação) | — |
-| Pilha térmica | **semanal**: CVU da semana operativa × capacidade **flexível** (máx. gerado nas 52 semanas anteriores − inflexibilidade média) + subsistema, por `cod_usinaplanejamento`; nuclear fora por definição (CEG `UTN`); ~15 GW | datasets `cvu` + `termica_despacho` |
+| Pilha térmica | **semanal**: CVU da semana operativa × capacidade **flexível** (máx. gerado nas 52 semanas anteriores − inflexibilidade média) + subsistema, por `cod_usinaplanejamento`; nuclear fora por definição (CEG `UTN`); ~15 GW. **Mínimo técnico** por usina (`pilha_minimo_quantil`, P10): menor nível sustentado da parcela flexível quando ligada (horas com vizinhas ligadas, sem rampa; mediana das 52 semanas) — piso da redução intradiária | datasets `cvu` + `termica_despacho` |
 
 Premissas mensais (`modelo/premissas.py`): nos anos observados tudo vem dos dados — carga (+ exportação),
 eólica potencial, solar cent/dist, ENA armazenável SIN, térmica total (o `data.py` do legado era uma cópia
@@ -129,24 +129,37 @@ manual do BALANCO_ENERGIA). Para 2026-28, `config/projecoes.yaml`.
 | componente | obs (MW) | sim (MW) | viés | MAE | MAE/média | R² |
 |---|---|---|---|---|---|---|
 | carga | 76.359 | 76.355 | −4 | 2.832 | 3,7 % | 0,87 |
-| eólica pós-corte | 11.480 | 11.525 | +45 | 2.266 | 19,7 % | 0,65 |
-| solar pós-corte | 7.002 | 6.988 | −14 | 754 | 10,8 % | 0,98 |
-| hidro FD | 24.089 | 24.096 | +8 | 1.827 | 7,6 % | 0,90 |
-| hidro R | 25.001 | 25.169 | +167 | 2.669 | 10,7 % | 0,74 |
-| térmica flexível | 1.203 | 1.107 | −96 | 707 | 59 % | 0,46 (mensal ~0,8) |
-| **carga líquida** | **26.175** | **26.253** | **+78** | **2.780** | **10,6 %** | **0,73** |
-| PLD vs CMO SE (R$/MWh) | 109 | 130 | +22 | 50 | — | **0,67** |
-| curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.292 | −660 | 1.756 | 60 % | 0,58 |
-| — só energético (ENE) | 1.618 | 969 | −650 | 1.147 | 71 % | 0,49 |
+| eólica pós-corte | 11.480 | 11.461 | −19 | 2.241 | 19,5 % | 0,66 |
+| solar pós-corte | 7.002 | 6.926 | −76 | 754 | 10,8 % | 0,98 |
+| hidro FD | 24.089 | 24.096 | +8 | 1.826 | 7,6 % | 0,90 |
+| hidro R | 25.001 | 25.169 | +167 | 2.670 | 10,7 % | 0,74 |
+| térmica flexível | 1.203 | 1.233 | +30 | 633 | 53 % | 0,55 (mensal ~0,8) |
+| **carga líquida** | **26.175** | **26.367** | **+192** | **2.727** | **10,4 %** | **0,74** |
+| PLD vs CMO SE (R$/MWh) | 109 | 129 | +20 | 51 | — | **0,67** |
+| curtailment eól. + solar cent. (COFF, 2023-10+) | 2.951 | 2.494 | −457 | 1.723 | 58 % | 0,60 |
+| — só energético (ENE) | 1.618 | 1.171 | −447 | 1.127 | 70 % | 0,53 |
 
-Antes do corte de rede como premissa (e com o bug do `''` no COFF, que inflava o potencial 2023-10→2024-12 em ~0,5 GW):
-eólica +685, carga líquida −457, hidro R −312, PLD R² 0,66. O viés da carga líquida era quase todo o corte de rede.
-O que falta no curtailment é todo **energético**: nas horas com ENE observado > 1 GW (17 % das horas desde 2023-10) o
-observado corta 9,3 GW e o simulado 4,9; o R é igual (~16,9 GW) mas a térmica observada fica em 1,7 GW enquanto o
-modelo reduz a base para 1,0 GW (regime `base_reduzida` absorve 0,57 GW médios em 2025 que na realidade viram corte),
-e a eólica amostrada não reproduz os dias de vento extremo (média dos cenários regride à média do mês).
+Histórico das duas últimas mudanças (mesma janela): (1) antes do corte de rede como premissa, e com o bug do `''` no
+COFF que inflava o potencial 2023-10→2024-12 em ~0,5 GW: eólica +685, carga líquida −457, hidro R −312 — o viés da
+carga líquida era quase todo o corte de rede. (2) Antes do mínimo técnico (base reduzida até zero na sobra): térmica
+R² 0,46 / intradiário MAE 366, carga líquida R² 0,73 / MAE 2.780, ENE 967. **Teste pareado por dia** (mesma semente)
+do mínimo técnico: térmica intradiária MAE 366 → 208, melhor em 98 % dos dias (p 10⁻⁸⁷); carga líquida intradiária
+1.886 → 1.806, 90 % dos dias; ENE diário melhor em 60 %; PLD intradiário 26,0 → 26,4 (pior em 54 % dos dias, p 3·10⁻⁴)
+e nível diário da térmica 544 → 597 (pior em 58 %) — nas horas com ENE observado > 1 GW o modelo mantém 1,9 GW
+de térmica (obs 1,7; antes 1,0). Aceito: a forma horária da térmica e da carga líquida melhora muito; o PLD fica
+neutro; o que piora é pequeno e explicado (Sergipe/GNA com mínimo ≈ 95 % da capacidade flexível).
 
-Regimes simulados: hidro marginal 83 %, curtailment 11 %, base reduzida 2 %, extra 3 % (observado: ±50 % do patamar semanal em 78 % das horas; abaixo 16 %, concentradas 8–14h com R ≈ 15,6 GW; acima 6 %, 16–22h com R p90 38,5 GW). **Componente intradiária** (`validacao/metricas_intradiarias.csv`, desvios da média diária): PLD corr 0,52 / R² 0,27 / MAE 26; hidro R corr 0,93 / R² 0,82; térmica R² < 0 (a forma horária da térmica simulada é pior que flat); spikes horários (> 1,5× a mediana da semana operativa, mesma definição nos dois lados; obs 3,3 % das horas, sim 0,7 %): precisão 0,14, recall 0,03 — o modelo não acerta *quando* o degrau ocorre. Qualquer mudança de estrutura horária deve ser julgada por estas métricas em teste pareado por dia, não pelo desvio-padrão.
+Por que o mínimo técnico e não "reduzir até zero" (2025-26, horas com corte energético > 1 GW = 25 % das horas):
+a inflexibilidade fica onde está (4,8 GW), a ordem de mérito cai de 1,95 para 1,09 GW e o **unit commitment sobe de
+0,24 para 0,68 GW** — a usina comprometida pelo DECOMP não desliga no vale solar, é reduzida ao mínimo e re-rotulada.
+Das usinas comprometidas no dia, 23 % desligam de fato, 40 % ficam abaixo de 40 % da capacidade e 34 % acima de 80 %.
+Quem fica ligada é ciclo combinado grande e carvão (Sergipe 1,6 GW a 86 %, Pecém, Itaqui, Parnaíba V, Maranhão 4/5);
+quem desliga são motores e ciclos abertos pequenos (Prosperidade, Poraque, Jaraqui) e algumas baratas (Marlim Azul,
+Pampa Sul, Aparecida). Correlação entre usinas desligar × CVU = −0,38: o ONS desliga quem *consegue* ciclar, não quem
+é cara. O piso P10 por usina (estimado sem usar as horas de sobra, causal) fecha 2/3 do erro: térmica flexível das
+comprometidas nas horas de sobra obs 1,9 GW (2025) / 1,5 (2026) vs Σ mínimos 1,6 / 1,2 vs zero.
+
+Regimes simulados: hidro marginal 83 %, curtailment 12 %, base reduzida 1 %, extra 3 % (observado: ±50 % do patamar semanal em 78 % das horas; abaixo 16 %, concentradas 8–14h com R ≈ 15,6 GW; acima 6 %, 16–22h com R p90 38,5 GW). **Componente intradiária** (`validacao/metricas_intradiarias.csv`, desvios da média diária): PLD corr 0,52 / R² 0,26 / MAE 26; hidro R corr 0,93 / R² 0,82; térmica corr 0,35 / MAE 209 (R² −0,6: ainda pior que flat, mas era −4,4); spikes horários (> 1,5× a mediana da semana operativa, mesma definição nos dois lados; obs 3,3 % das horas, sim 0,7 %): precisão 0,14, recall 0,03 — o modelo não acerta *quando* o degrau ocorre. Qualquer mudança de estrutura horária deve ser julgada por estas métricas em teste pareado por dia, não pelo desvio-padrão.
 
 Comparação dos modos (mesma simulação 2022-25): `valor_agua` com `fonte: pilha` (sem usar o CMO) → PLD R² 0,51, térmica R² 0,76; `exogena` → térmica R² 0,82, carga líquida viés −317, PLD R² 0,51; `residual` (legado) → térmica ≈ 0, carga líquida viés −716, PLD R² ≈ 0. O ganho de R² 0,70 vem do nível do patamar ser premissa; o modelo entrega a modulação.
 
@@ -157,9 +170,10 @@ hidro batia no limite (térmica ≈ 0 em 99,7 % das horas vs 48 % observado), e 
 prevê — o valor da água implícito (CVU marginal despachado) correlaciona só 0,5 com o CMO, e `flex ~ EAR + ENA + mês`
 dá R² 0,5 (mudança de regime em 2025-26). Já `CMO ~ térmica_flex` dá R² 0,82 mensal. Ver `Output/modelo/valor_agua_implicito.parquet`.
 
-Limitações restantes: o curtailment energético simulado fica ~40 % abaixo do observado (ver acima: base térmica
-reduzida em vez de corte; variabilidade da eólica amostrada); o corte de rede é premissa, não previsão; o PLD tem piso 61
-(CMO observado chega a 0) e subestima picos (out/2024: 360 vs 516).
+Limitações restantes: o curtailment energético simulado fica ~30 % abaixo do observado — o terço do erro de térmica
+que o mínimo técnico não fecha (usinas que nem ao mínimo vão: inflexibilidade real maior que a declarada, não está em dado
+público) e a eólica amostrada, que não reproduz os dias de vento extremo (média dos cenários regride à média do mês);
+o corte de rede é premissa, não previsão; o PLD tem piso 61 (CMO observado chega a 0) e subestima picos (out/2024: 360 vs 516).
 
 ## Premissas embutidas (herdadas do código original)
 
@@ -189,6 +203,9 @@ reduzida em vez de corte; variabilidade da eólica amostrada); o corte de rede �
 - **Cascata de curtailment**: quando eólica + solar centralizada = 0, o legado não cortava nada; aqui a distribuída é cortada.
 - **Corte de rede como premissa** (`curtailment_rede`): o legado (e o despacho) só produz corte energético; o de rede
   (CNF/REL, 2 GW médios em 2025) entra como premissa mensal com perfil horário observado, no padrão da térmica flexível.
+- **Mínimo técnico na sobra** (`pilha_minimo_quantil`): a base comprometida reduz até o piso de cada usina, não até zero;
+  a ordem continua da mais cara para a mais barata (na realidade o ONS desliga quem consegue ciclar, mas o total é o que
+  fecha o balanço). `0` volta ao comportamento antigo.
 - **Despacho por valor da água** (`termica_flexivel: valor_agua`, estrutura DECOMP → DESSEM) com preço horário pelo recurso
   marginal, VA semanal por subsistema e base comprometida; `exogena` (térmica base mensal) e `residual` (legado) continuam
   como opções. **Testado e descartado (sem ganho nas métricas ou reprovado no teste intradiário):** fator de despacho; proxy
