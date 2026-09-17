@@ -147,8 +147,10 @@ hidro batia no limite (térmica ≈ 0 em 99,7 % das horas vs 48 % observado), e 
 prevê — o valor da água implícito (CVU marginal despachado) correlaciona só 0,5 com o CMO, e `flex ~ EAR + ENA + mês`
 dá R² 0,5 (mudança de regime em 2025-26). Já `CMO ~ térmica_flex` dá R² 0,82 mensal. Ver `Output/modelo/valor_agua_implicito.parquet`.
 
-Limitações restantes: o curtailment simulado (~0,8 GW) é só o energético — o de rede (CNF/REL, a maior parte
-hoje) não é modelado, e a eólica pós-corte fica +0,5 GW acima da observada; o PLD tem piso 61 (CMO observado chega a 0)
+Limitações restantes: o curtailment é modelado endogenamente, mas só o **energético** (código ENE do COFF: sobra de
+energia no SIN com hidro R no mínimo e base térmica zerada) — em 2025 obs ENE 2,3 GW médios vs sim 1,8 GW. O corte de
+**rede** (CNF 1,4 GW + REL 0,6 GW em 2025; restrições regionais de transmissão/confiabilidade, quase todo NE) ocorre mesmo
+quando o SIN precisa da energia e um balanço agregado não o vê; é por isso que a eólica pós-corte fica +0,5 GW acima da observada; o PLD tem piso 61 (CMO observado chega a 0)
 e subestima picos (out/2024: 360 vs 516).
 
 ## Premissas embutidas (herdadas do código original)
