@@ -130,6 +130,22 @@ def validar():
     fig.savefig(out / "perfil_horario_carga_liquida.png", dpi=g["dpi"], bbox_inches="tight")
     plt.close(fig)
 
+    # 2b. perfil horário PLD simulado vs CMO observado por mês
+    fig, axes = plt.subplots(3, 4, figsize=(20, 12))
+    fig.suptitle("Preço: perfil horário médio por mês (CMO observado vs PLD simulado)", fontsize=15, fontweight="bold")
+    for ax, mes in zip(axes.flatten(), range(1, 13)):
+        d = df[df["mes"] == mes].groupby("hora")[["cmo_obs", "pld"]].mean()
+        if d.empty:
+            ax.set_title(f"{MESES_PT[mes]} (sem dados)")
+            continue
+        ax.plot(d.index, d["cmo_obs"], color="black", lw=2, label="CMO observado")
+        ax.plot(d.index, d["pld"], color="tab:red", lw=2, ls="--", label="PLD simulado")
+        ax.set(title=MESES_PT[mes], xlabel="hora", ylabel="R$/MWh", xticks=range(0, 24, 4))
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / "perfil_horario_preco.png", dpi=g["dpi"], bbox_inches="tight")
+    plt.close(fig)
+
     # 3. dispersão observado vs simulado (carga líquida e R)
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))
     for ax, (rot, o, s) in zip(axes, [COMPONENTES[6], COMPONENTES[4]]):

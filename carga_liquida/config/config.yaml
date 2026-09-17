@@ -145,7 +145,11 @@ modelo:
   #   exogena  -> histórico: média mensal observada; projeções: projecoes.yaml (termica_flexivel_mwmed).
   #               O despacho só adiciona térmica "extra" quando a hidro R satura (degrau de preço).
   #   residual -> legado: nenhuma térmica base; térmica só quando R bate no limite.
-  termica_flexivel: exogena
+  #   valor_agua -> premissa é o PREÇO-BASE (valor da água, R$/MWh; modelo/valor_agua.py). Base = pilha com CVU <= VA;
+  #               a hidro R fecha o balanço e o preço horário é o recurso marginal (VA | CVU extra | CVU reduzida | piso).
+  #               A térmica flexível horária responde à carga líquida (DECOMP -> DESSEM).
+  termica_flexivel: valor_agua
+  valor_agua_fonte: cmo                   # histórico: cmo (mediana semanal do CMO) | pilha (CVU na térmica média observada)
   termica_flexivel_perfil: observado      # modulação horária da base: flat | observado (treinar termica)
   # A carga do balanço não inclui a exportação (val_intercambio da linha SIN), mas a geração observada sim;
   # somar fecha a identidade geração = carga + exportação (~0,2-1 GW) e alinha a carga líquida simulada à observada.
