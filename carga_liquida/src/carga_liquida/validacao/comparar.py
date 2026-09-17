@@ -79,6 +79,33 @@ def _metricas(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def metricas_intradiarias(df: pd.DataFrame) -> pd.DataFrame:
+    """Componente intradiária (desvios da média diária): mede se a MODULAÇÃO horária acerta as horas certas.
+    Desvio-padrão parecido com o observado não é evidência — variância nas horas erradas também o aproxima."""
+    d = df.copy()
+    d["data"] = d["din_instante"].dt.date
+    pares = [("pld_vs_cmo", "cmo_obs", "pld"), ("hidro_r", "R", "val_gerhidro_reservatorio"),
+             ("termica_flex", "termica_flexivel", "val_term_despacho"), ("carga_liquida", "carga_liquida_historica", "carga_liquida")]
+    rows = []
+    for rot, o, s in pares:
+        if o not in d or s not in d:
+            continue
+        do = d[o] - d.groupby("data")[o].transform("mean")
+        ds = d[s] - d.groupby("data")[s].transform("mean")
+        e = ds - do
+        rows.append({"componente": rot, "corr_intradiaria": do.corr(ds), "r2_intradiario": 1 - (e ** 2).sum() / ((do - do.mean()) ** 2).sum(),
+                     "mae_intradiario": e.abs().mean(), "std_sim_obs": ds.std() / do.std()})
+    if "valor_agua" in d and "cmo_obs" in d:
+        sem = (d["din_instante"] - pd.to_timedelta((d["din_instante"].dt.weekday + 2) % 7, unit="D")).dt.normalize()
+        med = d.groupby(sem)["cmo_obs"].median()
+        spk_o = d["cmo_obs"] > 1.5 * sem.map(med).replace(0, np.nan)
+        spk_s = d["pld"] > 1.5 * d["valor_agua"]
+        tp = (spk_o & spk_s).sum()
+        rows.append({"componente": "spikes (CMO > 1,5x mediana semanal)", "obs_pct": 100 * spk_o.mean(), "sim_pct": 100 * spk_s.mean(),
+                     "precisao": tp / max(spk_s.sum(), 1), "recall": tp / max(spk_o.sum(), 1)})
+    return pd.DataFrame(rows)
+
+
 def validar():
     g = load_config()["graficos"]
     df = montar_comparacao()
@@ -92,6 +119,13 @@ def validar():
     for r in met.itertuples():
         logger.info(f"  {r.componente:<14} obs {r.obs_medio:8,.0f}  sim {r.sim_medio:8,.0f}  viés {r.bias_mw:+7,.0f}  "
                     f"MAE {r.mae_mw:6,.0f} ({r.mae_pct_media:4.1f}% da média)  R² {r.r2:5.3f}")
+    intra = metricas_intradiarias(df)
+    intra.to_csv(out / "metricas_intradiarias.csv", index=False)
+    for r in intra.itertuples():
+        if hasattr(r, "corr_intradiaria") and pd.notna(r.corr_intradiaria):
+            logger.info(f"  intradiário {r.componente:<14} corr {r.corr_intradiaria:.3f}  R² {r.r2_intradiario:+.3f}  MAE {r.mae_intradiario:6.1f}  std sim/obs {r.std_sim_obs:.2f}")
+        elif hasattr(r, "precisao") and pd.notna(getattr(r, "precisao", np.nan)):
+            logger.info(f"  {r.componente}: obs {r.obs_pct:.1f}%  sim {r.sim_pct:.1f}%  precisão {r.precisao:.2f}  recall {r.recall:.2f}")
     por_mes = pd.concat([_metricas(d).assign(ano=a, mes=m) for (a, m), d in df.groupby(["ano", "mes"])], ignore_index=True)
     por_mes.to_csv(out / "metricas_por_ano_mes.csv", index=False)
 

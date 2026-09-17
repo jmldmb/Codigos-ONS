@@ -145,9 +145,10 @@ modelo:
   min_hidro_reservatorio: 14500
   # Teto efetivo por modulação (observado 2023-26): R_max_semana ≈ a + b × R_médio_semana (R² 0,5). A disponibilidade
   # das UHEs R (~51 GW) nunca é o limite; o pico segue a energia hídrica alocada na semana (DECOMP -> DESSEM).
-  # R_médio da semana sai do balanço com as premissas mensais e a base térmica da semana (ponto fixo com a FD).
+  # DESATIVADO por padrão: no teste pareado intradiário (validacao) ele aumenta a dispersão do PLD nas horas erradas
+  # (MAE dos desvios 20,8 -> 22,8; térmica 306 -> 365; precisão dos spikes 0). Fica como opção.
   limite_modulacao:
-    ativo: true
+    ativo: false
     a_mw: 24300
     b: 0.54
   # Térmica "inflexível" da simulação (o que o modelo NÃO decide):
